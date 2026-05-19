@@ -1,8 +1,18 @@
 # Second Brain Starter Kit for Claude Code
 
-A self-growing, self-maintaining personal knowledge base powered by Claude Code, Obsidian, and automated pipelines.
+> *Give your AI a memory that grows itself.*
 
-Your wiki grows automatically from your conversations, emails, calendar, and tech news — while maintaining high quality through classification logic and confidence scoring.
+A self-growing, self-maintaining personal knowledge base powered by Claude Code, Obsidian, and automated pipelines. Name it whatever you want — Atlas, Nexus, Cortex, or just "My Brain."
+
+Your Second Brain grows automatically from your conversations, emails, calendar, and tech news — while maintaining high quality through classification logic and confidence scoring.
+
+```
+You: "I just talked to Sarah from Acme Corp about a React redesign"
+Brain: ✓ Updated [[acme-corp]] with new project info
+       ✓ Created [[sarah-jones]] with contact details  
+       ✓ Linked to [[react]] in tech stack
+       (auto-committed to Git)
+```
 
 ## What you get
 
@@ -25,15 +35,19 @@ Your wiki grows automatically from your conversations, emails, calendar, and tec
 ```bash
 git clone https://github.com/mahope/second-brain-starter.git my-brain
 cd my-brain
+claude
 ```
 
-Run the setup interview:
-```bash
-claude
+Then run the interactive setup:
+```
 > /wiki-setup
 ```
 
-This will ask you about your name, role, tech stack, and email — then configure everything.
+This will ask you to:
+- **Name your brain** (Atlas, Nexus, Vault, or anything you like)
+- Set your name, role, and tech stack
+- Create your first entities as examples
+- Initialize Git with your personalized config
 
 ### 2. Open in Obsidian
 
