@@ -1,0 +1,18 @@
+# Obsidian workspace (user-specific)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Raw source data (too large for Git)
+_sources/
+
+# Syncthing
+.stfolder/
+.stignore
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Credentials
+.env
+*.creds

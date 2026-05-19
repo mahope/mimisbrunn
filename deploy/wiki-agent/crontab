@@ -1,0 +1,16 @@
+# Wiki Agent Cron Jobs (all times UTC)
+# DK time = UTC + 2 (summer)
+
+# Email export: every 4 hours (catches emails throughout the day)
+0 4,8,12,16,20 * * * root /app/scripts/run-email-export.sh >> /var/log/wiki-agent.log 2>&1
+
+# Pull wiki + send briefings: every 30 min
+*/30 * * * * root /app/scripts/run-pull-and-send.sh >> /var/log/wiki-agent.log 2>&1
+
+# Dashboard + completeness: daily at 05:00 UTC (07:00 DK)
+0 5 * * * root /app/scripts/run-dashboard.sh >> /var/log/wiki-agent.log 2>&1
+
+# Client website health check: weekly Sunday 17:00 UTC (19:00 DK)
+0 17 * * 0 root /app/scripts/run-health-check.sh >> /var/log/wiki-agent.log 2>&1
+
+# Empty line required by cron

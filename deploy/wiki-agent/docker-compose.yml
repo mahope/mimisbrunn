@@ -1,0 +1,20 @@
+services:
+  wiki-agent:
+    build: .
+    container_name: wiki-agent
+    restart: unless-stopped
+    environment:
+      - HOSTINGER_EMAIL=mads@mahope.dk
+      - HOSTINGER_PASSWORD=${HOSTINGER_PASSWORD}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    volumes:
+      - wiki-data:/wiki
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  wiki-data:

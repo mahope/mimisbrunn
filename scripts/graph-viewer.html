@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<title>LLM Wiki Graph</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: system-ui, sans-serif; overflow: hidden; }
+#controls { position: fixed; top: 16px; left: 16px; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap; }
+#controls button, #controls select { background: #16213e; color: #eee; border: 1px solid #0f3460; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#controls button:hover { background: #0f3460; }
+#controls button.active { background: #e94560; border-color: #e94560; }
+#stats { position: fixed; bottom: 16px; left: 16px; z-index: 10; background: #16213e; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.6; border: 1px solid #0f3460; }
+#tooltip { position: fixed; display: none; background: #16213e; color: #eee; padding: 10px 14px; border-radius: 8px; font-size: 13px; pointer-events: none; border: 1px solid #e94560; z-index: 20; max-width: 300px; }
+#search { position: fixed; top: 16px; right: 16px; z-index: 10; }
+#search input { background: #16213e; color: #eee; border: 1px solid #0f3460; padding: 8px 14px; border-radius: 6px; font-size: 14px; width: 220px; }
+svg { width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<div id="controls">
+  <button class="active" data-filter="all">Alle (365)</button>
+  <button data-filter="client">Clients</button>
+  <button data-filter="person">People</button>
+  <button data-filter="project">Projects</button>
+  <button data-filter="tool">Tools</button>
+  <button data-filter="concept">Concepts</button>
+  <button data-filter="place">Places</button>
+  <button data-filter="recipe">Recipes</button>
+</div>
+<div id="search"><input type="text" placeholder="Soeg entity..." id="searchInput"></div>
+<div id="stats">Loading...</div>
+<div id="tooltip"></div>
+<svg></svg>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const typeColors = {
+  client: "#e94560", person: "#0f3460", project: "#533483",
+  tool: "#16c79a", concept: "#f5a623", place: "#11999e",
+  recipe: "#e84545", unknown: "#666"
+};
+
+fetch("../_graph.json").then(r => r.json()).then(data => {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  const svg = d3.select("svg")
+    .attr("viewBox", [0, 0, width, height])
+    .call(d3.zoom().scaleExtent([0.1, 8]).on("zoom", ({transform}) => {
+      g.attr("transform", transform);
+    }));
+
+  const g = svg.append("g");
+  const tooltip = d3.select("#tooltip");
+  const stats = d3.select("#stats");
+
+  const nodeMap = new Map(data.nodes.map(n => [n.id, {...n}]));
+  const links = data.edges.filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
+    .map(e => ({source: e.source, target: e.target}));
+  const nodes = data.nodes.filter(n => nodeMap.has(n.id));
+
+  const maxLinks = Math.max(...nodes.map(n => n.links_in + n.links_out));
+
+  const simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(80).strength(0.3))
+    .force("charge", d3.forceManyBody().strength(-120))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide().radius(d => nodeRadius(d) + 2));
+
+  function nodeRadius(d) {
+    return Math.max(4, Math.sqrt((d.links_in + d.links_out) / maxLinks) * 30);
+  }
+
+  const link = g.append("g")
+    .selectAll("line")
+    .data(links)
+    .join("line")
+    .attr("stroke", "#ffffff10")
+    .attr("stroke-width", 0.5);
+
+  const node = g.append("g")
+    .selectAll("circle")
+    .data(nodes)
+    .join("circle")
+    .attr("r", d => nodeRadius(d))
+    .attr("fill", d => typeColors[d.type] || typeColors.unknown)
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 0.5)
+    .attr("opacity", 0.85)
+    .call(d3.drag()
+      .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on("end", (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  const label = g.append("g")
+    .selectAll("text")
+    .data(nodes.filter(n => (n.links_in + n.links_out) > 15))
+    .join("text")
+    .text(d => d.entity)
+    .attr("font-size", d => Math.max(8, Math.sqrt((d.links_in + d.links_out) / maxLinks) * 16))
+    .attr("fill", "#ffffffcc")
+    .attr("text-anchor", "middle")
+    .attr("dy", d => -nodeRadius(d) - 4)
+    .attr("pointer-events", "none");
+
+  node.on("mouseover", (e, d) => {
+    tooltip.style("display", "block")
+      .html(`<strong>${d.entity}</strong><br>Type: ${d.type}<br>Confidence: ${d.confidence}<br>Links ind: ${d.links_in}<br>Links ud: ${d.links_out}`);
+    link.attr("stroke", l => (l.source.id === d.id || l.target.id === d.id) ? typeColors[d.type] : "#ffffff10")
+      .attr("stroke-width", l => (l.source.id === d.id || l.target.id === d.id) ? 2 : 0.5);
+    node.attr("opacity", n => {
+      if (n.id === d.id) return 1;
+      const connected = links.some(l => (l.source.id === d.id && l.target.id === n.id) || (l.target.id === d.id && l.source.id === n.id));
+      return connected ? 1 : 0.15;
+    });
+  }).on("mousemove", e => {
+    tooltip.style("left", (e.pageX + 14) + "px").style("top", (e.pageY - 14) + "px");
+  }).on("mouseout", () => {
+    tooltip.style("display", "none");
+    link.attr("stroke", "#ffffff10").attr("stroke-width", 0.5);
+    node.attr("opacity", 0.85);
+  });
+
+  simulation.on("tick", () => {
+    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    node.attr("cx", d => d.x).attr("cy", d => d.y);
+    label.attr("x", d => d.x).attr("y", d => d.y);
+  });
+
+  // Stats
+  stats.html(`<strong>Wiki Graph</strong><br>${nodes.length} noder | ${links.length} forbindelser<br>Gns: ${(links.length*2/nodes.length).toFixed(1)} links/entity`);
+
+  // Filter buttons
+  d3.selectAll("#controls button").on("click", function() {
+    const filter = this.dataset.filter;
+    d3.selectAll("#controls button").classed("active", false);
+    d3.select(this).classed("active", true);
+    node.attr("opacity", d => filter === "all" || d.type === filter ? 0.85 : 0.05);
+    link.attr("opacity", l => {
+      if (filter === "all") return 1;
+      return (l.source.type === filter || l.target.type === filter) ? 1 : 0.03;
+    });
+    label.attr("opacity", d => filter === "all" || d.type === filter ? 1 : 0.1);
+  });
+
+  // Search
+  d3.select("#searchInput").on("input", function() {
+    const q = this.value.toLowerCase();
+    if (!q) { node.attr("opacity", 0.85); label.attr("opacity", 1); return; }
+    node.attr("opacity", d => d.entity.toLowerCase().includes(q) || d.id.includes(q) ? 1 : 0.08);
+    label.attr("opacity", d => d.entity.toLowerCase().includes(q) || d.id.includes(q) ? 1 : 0.1);
+  });
+});
+</script>
+</body>
+</html>
