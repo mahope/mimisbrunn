@@ -138,6 +138,46 @@ For 24/7 automation without your PC running, deploy the wiki-agent service:
 
 See `deploy/wiki-agent/SETUP.md` for instructions.
 
+## Importing Your Data
+
+The `/wiki-import` skill auto-detects your data format. Just drop a file:
+
+```
+> /wiki-import ~/Downloads/chatgpt-export.zip
+> /wiki-import ~/Downloads/Basic_LinkedInDataExport.zip
+> /wiki-import ~/Downloads/facebook-data.zip
+> /wiki-import ~/Downloads/takeout.zip
+> /wiki-import ~/Downloads/notion-export.zip
+```
+
+### Supported Sources
+
+| Source | How to get your data | What's extracted |
+|--------|---------------------|-----------------|
+| **ChatGPT** | Settings → Data controls → Export | Conversations → entities, decisions, knowledge |
+| **Claude** | claude.ai → Settings → Export | Same as ChatGPT |
+| **LinkedIn** | Settings → Get a copy of your data | Profile, positions, education, skills, volunteering |
+| **Facebook** | Settings → Download your information | Profile, friends, events, posts (milestones only) |
+| **Google Takeout** | takeout.google.com | Contacts, calendar events, Drive file list |
+| **Notion** | Settings → Export (Markdown) | Pages → wiki entities |
+| **Email (any IMAP)** | Automatic via adapter | Conversations → client/contact entities |
+| **Markdown files** | Drop a folder | Direct import with classification |
+
+### Standalone Adapters
+
+You can also run adapters directly:
+
+```bash
+python scripts/adapters/chatgpt.py ~/Downloads/chatgpt-export.zip
+python scripts/adapters/linkedin.py ~/Downloads/linkedin-export.zip
+python scripts/adapters/facebook.py ~/Downloads/facebook-data.zip
+python scripts/adapters/email-imap.py gmail user@gmail.com app-password 30
+python scripts/adapters/notion.py ~/Downloads/notion-export.zip
+python scripts/adapters/google-takeout.py ~/Downloads/takeout.zip
+```
+
+After running an adapter, use `/wiki-auto-ingest` to process the extracted data into wiki entities.
+
 ## Customization
 
 ### Adding entity types
