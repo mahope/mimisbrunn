@@ -49,11 +49,21 @@ This will ask you to:
 - Create your first entities as examples
 - Initialize Git with your personalized config
 
-### 2. Open in Obsidian
+### 2. Enable the secret-scanning hook
+
+The repo ships a pre-commit hook that blocks accidental commits of API keys (Resend, GitHub PAT, OpenAI/Anthropic, AWS, Stripe, Slack, Google, private key blocks). Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+To bypass for a known-false-positive: `git commit --no-verify`.
+
+### 3. Open in Obsidian
 
 Open the vault folder in Obsidian: File → Open Vault → select `my-brain/`
 
-### 3. Start using it
+### 4. Start using it
 
 In any Claude Code session, the wiki works automatically:
 - Mention a client → wiki updates

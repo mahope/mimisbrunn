@@ -15,4 +15,8 @@ Thumbs.db
 
 # Credentials
 .env
+.env.*
+!.env.example
 *.creds
+*.pem
+*.key

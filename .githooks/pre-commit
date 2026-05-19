@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Block commits that introduce known secret patterns.
+set -euo pipefail
+
+patterns=(
+  'Resend API key|re_[A-Za-z0-9_]{30,}'
+  'GitHub classic PAT|ghp_[A-Za-z0-9]{36}'
+  'GitHub fine-grained PAT|github_pat_[A-Za-z0-9_]{80,}'
+  'OpenAI/Anthropic key|sk-[A-Za-z0-9_-]{20,}'
+  'AWS access key|AKIA[0-9A-Z]{16}'
+  'Slack token|xox[baprs]-[A-Za-z0-9-]{10,}'
+  'Google API key|AIza[0-9A-Za-z_-]{35}'
+  'Stripe live key|sk_live_[0-9a-zA-Z]{24,}'
+  'Private key block|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+)
+
+diff=$(git diff --cached --diff-filter=AM --no-color -U0 || true)
+added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+
+if [ -z "$added" ]; then
+  exit 0
+fi
+
+found=0
+for entry in "${patterns[@]}"; do
+  name="${entry%%|*}"
+  rx="${entry#*|}"
+  match=$(printf '%s\n' "$added" | grep -E -e "$rx" || true)
+  if [ -n "$match" ]; then
+    found=1
+    echo "BLOCKED: $name detected in staged changes:"
+    printf '%s\n' "$match" | sed 's/^/   /'
+    echo
+  fi
+done
+
+if [ "$found" -eq 1 ]; then
+  echo "Remove the secret before committing. Use 'git commit --no-verify' only if you are certain it's a false positive."
+  exit 1
+fi
