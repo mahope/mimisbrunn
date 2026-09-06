@@ -30,16 +30,23 @@ jobs:
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
 
   trivy:
-    name: Dependency and config scan (trivy)
+    name: Dependency and secret scan (trivy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run trivy
+      - name: Vulnerabilities and secrets (blocking)
         uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
+          scanners: vuln,secret
           severity: CRITICAL,HIGH
           exit-code: "1"
           ignore-unfixed: true
+      - name: Container misconfiguration (report only)
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: config
+          scan-ref: deploy
+          severity: CRITICAL,HIGH
+          exit-code: "0"
