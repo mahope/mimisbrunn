@@ -39,6 +39,21 @@ def log(msg: str) -> None:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
 
 
+def _regen_due(min_interval: int = 30) -> bool:
+    """regen-index.py laeser og skriver ~900 filer og tager 1,5-2,5 s. Ved en byge af
+    Edit/Write er én koersel nok (issue #26)."""
+    stamp = WIKI / "_index" / ".regen-stamp"
+    now = datetime.now().timestamp()
+    try:
+        if stamp.exists() and now - stamp.stat().st_mtime < min_interval:
+            return False
+        stamp.parent.mkdir(exist_ok=True)
+        stamp.write_text(str(now), encoding="utf-8")
+    except Exception:
+        return True
+    return True
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -59,11 +74,13 @@ def main() -> int:
 
     paths = [rel]
     if rel.startswith("entities/"):
-        subprocess.run([sys.executable, str(WIKI / "scripts" / "regen-index.py")], cwd=WIKI,
-                       capture_output=True, timeout=60)
-        paths.append("_index.md")
-        # regen-index.py skriver ogsaa hub-siderne; uden dem her bliver arbejdskopien
+        if _regen_due():
+            subprocess.run([sys.executable, str(WIKI / "scripts" / "regen-index.py")], cwd=WIKI,
+                           capture_output=True, timeout=60)
+        # Stages ogsaa naar regenereringen blev debounced: en tidligere koersel i
+        # vinduet kan have efterladt dem ucommittede. Uden dem bliver arbejdskopien
         # permanent dirty, og serverens pull-loop springer pull over (issue #18).
+        paths.append("_index.md")
         paths += sorted(p.relative_to(WIKI).as_posix() for p in (WIKI / "entities" / "_hubs").glob("hub-*.md"))
     git("add", "--", *[p for p in paths if (WIKI / p).exists()])
     if git("diff", "--cached", "--quiet").returncode == 0:

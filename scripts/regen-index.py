@@ -154,4 +154,44 @@ out.append(f"**Antal sider:** {total}")
 out.append(f"**Sidst opdateret:** {date.today().isoformat()} (auto-genereret)")
 
 (wiki / "_index.md").write_text("\n".join(out), encoding="utf-8")
+
+# Kompakt cache til SessionStart-hooket: uden den laeser hooket alle 900 filer ved
+# hver sessionsstart (issue #26). Ligger i _index/ som er gitignored.
+def _write_pages_json():
+    import json as _json
+    rows = []
+    for cat in categories:
+        d = wiki / "entities" / cat
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.md")):
+            text = f.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
+            fm = extract_frontmatter(text) or {}
+            if not isinstance(fm, dict) or str(fm.get("type", "")) == "redirect":
+                continue
+            body = text.split("---\n", 2)[-1] if text.startswith("---") else text
+            secs = body.split("\n## ")
+            last = ""
+            if len(secs) > 1:
+                title, _, rest = secs[-1].partition("\n")
+                last = (title.strip() + ": " + " ".join(rest.split()))[:400]
+            dated = [" ".join(l.split())[:220] for l in body.splitlines()
+                     if l.startswith("- **") and any(ch.isdigit() for ch in l[:14])]
+            rows.append({
+                "slug": f.stem, "folder": cat, "path": f.relative_to(wiki).as_posix(),
+                "entity": str(fm.get("entity") or f.stem), "type": str(fm.get("type") or cat),
+                "aliases": [str(a) for a in (fm.get("aliases") or [])],
+                "resource": str(fm.get("resource") or ""),
+                "description": str(fm.get("description") or ""),
+                "last_updated": str(fm.get("last_updated") or ""),
+                "confidence": str(fm.get("confidence") or ""),
+                "last_section": last, "recent": dated[-3:],
+            })
+    outdir = wiki / "_index"
+    outdir.mkdir(exist_ok=True)
+    (outdir / "pages.json").write_text(_json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    return len(rows)
+
+
+print(f"Wrote _index/pages.json ({_write_pages_json()} pages)")
 print(f"Regenerated _index.md with {total} entries across {len(categories)} categories")

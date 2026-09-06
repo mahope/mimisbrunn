@@ -1,16 +1,32 @@
 # Wiki Agent Cron Jobs (all times UTC)
 # DK time = UTC + 2 (summer)
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
 
-# Email export: every 4 hours (catches emails throughout the day)
-0 4,8,12,16,20 * * * root /app/scripts/run-email-export.sh >> /var/log/wiki-agent.log 2>&1
+# All jobs share /tmp/wiki-agent-git.lock via flock to serialize git
+# operations on /wiki — concurrent `git pull --rebase` produced
+# "Cannot rebase onto multiple branches" when email-export and
+# pull-and-send collided at :00. -w 300 = wait up to 5 min for lock.
 
-# Pull wiki + send briefings: every 30 min
-*/30 * * * * root /app/scripts/run-pull-and-send.sh >> /var/log/wiki-agent.log 2>&1
+# Email export: 3x daily at 04:15, 10:15 and 16:15 UTC (06:15, 12:15, 18:15 DK).
+# Was every 30 min, which produced 105 of 194 commits in a week with 1-2 files each
+# and no faster ingest, since the ingest routines only run twice a day (issue #32).
+15 4,10,16 * * * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-email-export.sh >> /var/log/wiki-agent.log 2>&1
+
+# Pull wiki + send briefings: hourly at :30 (briefings are written by routines a few times a day)
+30 * * * * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-pull-and-send.sh >> /var/log/wiki-agent.log 2>&1
 
 # Dashboard + completeness: daily at 05:00 UTC (07:00 DK)
-0 5 * * * root /app/scripts/run-dashboard.sh >> /var/log/wiki-agent.log 2>&1
+0 5 * * * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-dashboard.sh >> /var/log/wiki-agent.log 2>&1
 
 # Client website health check: weekly Sunday 17:00 UTC (19:00 DK)
-0 17 * * 0 root /app/scripts/run-health-check.sh >> /var/log/wiki-agent.log 2>&1
+0 17 * * 0 flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-health-check.sh >> /var/log/wiki-agent.log 2>&1
+
+# Billy Revenue Tracker
+30 6 * * * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-billy-sync.sh >> /var/log/wiki-agent.log 2>&1
+0 7 * * 1,4 flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-billy-digest.sh >> /var/log/wiki-agent.log 2>&1
+0 7 1 * * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-billy-monthly.sh >> /var/log/wiki-agent.log 2>&1
+0 7 1 1,4,7,10 * flock -w 300 /tmp/wiki-agent-git.lock /app/scripts/run-billy-quarterly.sh >> /var/log/wiki-agent.log 2>&1
 
 # Empty line required by cron
+

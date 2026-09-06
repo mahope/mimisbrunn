@@ -4,7 +4,7 @@ SessionStart-hook: finder de wiki-sider der matcher det projekt Claude er åbnet
 og printer et kompakt kontekst-resumé (som injiceres i sessionen).
 
 Matching (i prioriteret rækkefølge):
-1. `resource:` i frontmatter indeholder repo-navnet (e.g. github.com/you/your-app)
+1. `resource:` i frontmatter indeholder repo-navnet (fx github.com/mahope/timetrack)
 2. mappenavnet er lig slug, entity eller et alias
 3. mappenavnet nævnes i description
 
@@ -25,13 +25,18 @@ try:  # libyaml: ~8x hurtigere frontmatter-parsing (issue #19)
 except ImportError:  # pragma: no cover
     from yaml import SafeLoader as _YamlLoader
 
+try:  # hooket koeres uden PYTHONIOENCODING; uden dette bliver aeoe til mojibake
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # pragma: no cover
+    pass
+
 WIKI = Path(__file__).resolve().parent.parent
 ENTITIES = WIKI / "entities"
 MAX_PAGES = 4
 BUDGET_CHARS = 2400       # samlet budget for injiceret kontekst (ekskl. kritiske fakta)
 PER_PAGE_CHARS = 700
 MIN_SCORE = 6
-GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "users", "home"}
+GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "mads_", "users"}
 
 
 def frontmatter(text):
@@ -76,6 +81,39 @@ def last_section(body: str):
     return f"{title.strip()}: {rest[:300]}"
 
 
+def load_pages():
+    """Rows fra _index/pages.json naar den er nyere end den nyeste entitet, ellers fuld scanning.
+
+    Den fulde scanning laeser 900 filer (~670 ms) ved hver sessionsstart; cachen goer
+    det til et enkelt json-load (issue #26).
+    """
+    cache = WIKI / "_index" / "pages.json"
+    try:
+        newest = max(f.stat().st_mtime for f in ENTITIES.glob("*/*.md"))
+        if cache.exists() and cache.stat().st_mtime >= newest:
+            return json.loads(cache.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    rows = []
+    for path in ENTITIES.glob("*/*.md"):
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
+        except Exception:
+            continue
+        fm, body = frontmatter(text)
+        if not isinstance(fm, dict) or str(fm.get("type", "")) == "redirect":
+            continue
+        rows.append({
+            "slug": path.stem, "path": path.relative_to(WIKI).as_posix(),
+            "entity": str(fm.get("entity") or path.stem), "type": str(fm.get("type") or path.parent.name),
+            "aliases": [str(a) for a in (fm.get("aliases") or [])],
+            "resource": str(fm.get("resource") or ""), "description": str(fm.get("description") or ""),
+            "last_updated": str(fm.get("last_updated") or ""), "confidence": str(fm.get("confidence") or ""),
+            "last_section": last_section(body), "recent": recent_lines(body),
+        })
+    return rows
+
+
 def main():
     try:
         payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
@@ -88,16 +126,12 @@ def main():
     if not names:
         return 0
     hits = []
-    for path in ENTITIES.glob("*/*.md"):
-        text = path.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
-        fm, body = frontmatter(text)
-        if not isinstance(fm, dict):
-            continue
-        slug = path.stem.lower()
-        entity = str(fm.get("entity", "")).lower()
-        aliases = [str(a).lower() for a in (fm.get("aliases") or [])]
-        resource = str(fm.get("resource") or "").lower()
-        desc = str(fm.get("description") or "").lower()
+    for row in load_pages():
+        slug = row["slug"].lower()
+        entity = str(row.get("entity", "")).lower()
+        aliases = [str(a).lower() for a in (row.get("aliases") or [])]
+        resource = str(row.get("resource") or "").lower()
+        desc = str(row.get("description") or "").lower()
         score = 0
         for i, n in enumerate(names):
             w = 3 - i
@@ -106,7 +140,7 @@ def main():
             elif slug.startswith(n) or n in slug: score += 3 * w
             elif re.search(rf"\b{re.escape(n)}\b", desc): score += 2 * w
         if score:
-            hits.append((score, path, fm, body))
+            hits.append((score, row))
     hits = [h for h in hits if h[0] >= MIN_SCORE]
     out = []
     crit = WIKI / "_critical-facts.md"
@@ -120,18 +154,16 @@ def main():
     hits.sort(key=lambda h: -h[0])
     out.append("[wiki-kontekst] Sider i LLM Wikien der matcher dette projekt (hent detaljer med wiki_outline/wiki_get):")
     used = 0
-    for score, path, fm, body in hits[:MAX_PAGES]:
+    for score, row in hits[:MAX_PAGES]:
         if used >= BUDGET_CHARS:
             break
         block = []
-        rel = path.relative_to(WIKI).as_posix()
-        block.append(f"- {fm.get('entity', path.stem)} ({fm.get('type', path.parent.name)}, opdateret {fm.get('last_updated', '?')}, confidence {fm.get('confidence', '?')}) -> {rel}")
-        if fm.get("description"):
-            block.append(f"  {fm['description']}")
-        ls = last_section(body)
-        if ls:
-            block.append(f"  Seneste sektion — {ls}")
-        for l in recent_lines(body):
+        block.append(f"- {row['entity']} ({row['type']}, opdateret {row.get('last_updated') or '?'}, confidence {row.get('confidence') or '?'}) -> {row['path']}")
+        if row.get("description"):
+            block.append(f"  {row['description']}")
+        if row.get("last_section"):
+            block.append(f"  Seneste sektion — {row['last_section'][:300]}")
+        for l in (row.get("recent") or []):
             block.append(f"  {l}")
         text = "\n".join(block)
         if len(text) > PER_PAGE_CHARS:

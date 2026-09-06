@@ -106,6 +106,7 @@ class Page:
 
 
 _INDEX: dict[str, Page] = {}
+_ALIAS: dict[str, str] = {}   # entity/alias (lowercase) -> slug
 _INDEX_TIME = 0.0
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 STALE_DEFAULT_DAYS = {"client": 180, "project": 60, "person": 365, "place": 365, "recipe": 365}
@@ -328,7 +329,7 @@ def _parse(path: Path) -> Page | None:
 
 def _refresh(force: bool = False) -> None:
     """Re-scan changed files (cheap: 900 files, stat only unless changed)."""
-    global _INDEX_TIME, _FTS_DIRTY, _EMB_DIRTY
+    global _INDEX_TIME, _FTS_DIRTY, _EMB_DIRTY, _ALIAS
     with LOCK:
         if not force and time.time() - _INDEX_TIME < 2:
             return
@@ -348,6 +349,12 @@ def _refresh(force: bool = False) -> None:
                 del _INDEX[slug]
                 _FTS_DIRTY = True
                 _EMB_DIRTY = True
+        alias: dict[str, str] = {}
+        for slug, page in _INDEX.items():
+            alias.setdefault(page.entity.lower(), slug)
+            for a in (page.fm.get("aliases") or []):
+                alias.setdefault(str(a).lower(), slug)
+        _ALIAS = alias
         _INDEX_TIME = time.time()
 
 
@@ -364,14 +371,9 @@ def _resolve(name: str) -> Page | None:
     key = name.strip().lower().replace(" ", "-")
     if key in _INDEX:
         return _follow(_INDEX[key])
-    low = name.strip().lower()
-    for p in _INDEX.values():
-        if p.entity.lower() == low:
-            return _follow(p)
-        aliases = p.fm.get("aliases") or []
-        if isinstance(aliases, list) and any(str(a).lower() == low for a in aliases):
-            return _follow(p)
-    return None
+    # Alias-opslag i et map bygget i _refresh i stedet for lineaer scanning (issue #26).
+    hit = _ALIAS.get(name.strip().lower())
+    return _follow(_INDEX[hit]) if hit and hit in _INDEX else None
 
 
 def _snippet(body: str, terms: list[str], width: int = 220) -> str:
