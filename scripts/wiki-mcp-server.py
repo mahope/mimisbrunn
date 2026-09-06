@@ -656,6 +656,8 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
         return {"error": f"Ingen side '{slug}' — brug wiki_create eller tjek stavning via wiki_search"}
     if re.search(r"(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}", text, re.I):
         return {"error": "Afvist: teksten ligner en hemmelighed (password/API-nøgle). Gem den i Bitwarden."}
+    if not section and COMMIT_RE.match(text.strip().split("\n")[0]):
+        section = "Aftaler"   # aftale-formatet hører altid hjemme i sin egen sektion (issue #38)
     raw = p.path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
     m = re.match(r"---\n(.*?)\n---\n", raw, re.S)
     if not m:
@@ -864,6 +866,118 @@ def _pull_loop(interval: int) -> None:
 
 
 
+# --------------------------------------------------------------------------- aftaler (issue #38)
+# Konvention, én linje pr. aftale under "## Aftaler":
+#   - [ ] (aftalt 2026-09-06, forfald 2026-09-20) Mads -> [[john-tidtilro]]: sender tilbud paa destinationsmodul
+# Pilen må skrives som -> eller den typografiske variant. Er der ingen pil, regnes
+# aftalen som Mads' egen. [x] markerer den som indfriet.
+COMMIT_RE = re.compile(
+    r"^\s*-\s*\[(?P<done>[ xX])\]\s*"
+    r"\((?P<meta>[^)]*)\)\s*"
+    r"(?P<who>[^:]{0,80}?)\s*:\s*"
+    r"(?P<what>.+?)\s*$")
+_DATE_RE = re.compile(r"(aftalt|forfald)\s+(\d{4}-\d{2}-\d{2})")
+_ARROW_RE = re.compile(r"\s*(?:->|\u2192|\u21d2)\s*")
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
+
+
+def _party(raw: str) -> str:
+    """'[[john-tidtilro|John]]' -> 'john-tidtilro'; 'Mads' -> 'Mads'."""
+    m = _WIKILINK_RE.search(raw or "")
+    return (m.group(1) if m else (raw or "").strip()).strip()
+
+
+def _parse_commitment(line: str, page: "Page") -> dict | None:
+    m = COMMIT_RE.match(line)
+    if not m:
+        return None
+    meta = dict((k, v) for k, v in _DATE_RE.findall(m.group("meta")))
+    who = m.group("who") or ""
+    parts = _ARROW_RE.split(who, maxsplit=1)
+    if len(parts) == 2:
+        owner, counterpart = _party(parts[0]), _party(parts[1])
+    else:
+        # Uden pil er 'who' den der skylder, og modparten er siden aftalen står på.
+        owner, counterpart = (_party(who) or "Mads"), page.slug
+    due = meta.get("forfald", "")
+    overdue_days = 0
+    if due:
+        d = _to_date(due)
+        if d:
+            overdue_days = (dt.date.today() - d).days
+    done = m.group("done").lower() == "x"
+    if done:
+        overdue_days = 0
+    return {
+        "slug": page.slug, "entity": page.entity, "path": page.path.relative_to(WIKI).as_posix(),
+        "done": done,
+        "owner": owner, "counterpart": counterpart,
+        "what": m.group("what").strip(),
+        "agreed": meta.get("aftalt", ""), "due": due,
+        "overdue_days": overdue_days if overdue_days > 0 else 0,
+        "line": line.strip(),
+    }
+
+
+def _all_commitments() -> list[dict]:
+    """Alle aftaler fra "## Aftaler"-sektionerne. Snapshot-læsning, ingen lås."""
+    out = []
+    for p in _INDEX.values():
+        if p.is_redirect or p.is_generated:
+            continue
+        for head, text in _sections(p.body):
+            if head.strip().lower() != "aftaler":
+                continue
+            for line in text.split("\n"):
+                c = _parse_commitment(line, p)
+                if c:
+                    out.append(c)
+    return out
+
+
+def wiki_commitments(person: str = "", overdue: bool = False, include_done: bool = False,
+                     within_days: int = 0, limit: int = 50) -> list[dict]:
+    """Aftaler og loefter fra "## Aftaler"-sektionerne paa tvaers af wikien.
+
+    `person` filtrerer på slug eller navn i begge ender af aftalen. `overdue=True` giver kun
+    dem hvis forfald er passeret. `within_days` giver dem der forfalder inden for N dage.
+    Sorteret med de mest forfaldne først. Brug den til 'hvad har jeg lovet hvem'."""
+    _refresh()
+    rows = [c for c in _all_commitments() if include_done or not c["done"]]
+    if person:
+        needle = person.strip().lower()
+        rows = [c for c in rows
+                if needle in c["owner"].lower() or needle in c["counterpart"].lower() or needle in c["slug"].lower()]
+    if overdue:
+        rows = [c for c in rows if c["overdue_days"] > 0]
+    if within_days:
+        horizon = dt.date.today() + dt.timedelta(days=within_days)
+        rows = [c for c in rows if c["due"] and (_to_date(c["due"]) or dt.date.max) <= horizon]
+    rows.sort(key=lambda c: (-c["overdue_days"], c["due"] or "9999-99-99", c["slug"]))
+    return rows[:limit]
+
+
+def wiki_commit_add(slug: str, what: str, due: str = "", agreed: str = "",
+                    owner: str = "Mads", counterpart: str = "") -> dict:
+    """Tilføj en aftale til en sides "## Aftaler". `what` = hvad der er lovet, én sætning.
+    `due` og `agreed` er YYYY-MM-DD (agreed defaulter til i dag). `owner` er den der skylder;
+    sæt owner til personen og counterpart til 'Mads' når det er den anden vej."""
+    page = _resolve(slug)
+    if not page:
+        return {"error": f"Ingen side '{slug}' — tjek stavning via wiki_search"}
+    for label, value in (("agreed", agreed), ("due", due)):
+        if value and not re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+            return {"error": f"{label} skal være YYYY-MM-DD"}
+    agreed = agreed or dt.date.today().isoformat()
+    other = counterpart or f"[[{page.slug}]]"
+    meta = f"aftalt {agreed}" + (f", forfald {due}" if due else "")
+    line = f"- [ ] ({meta}) {owner} → {other}: {what.strip()}"
+    res = wiki_append(page.slug, line, section="Aftaler")
+    if isinstance(res, dict) and "error" not in res:
+        res["commitment"] = line
+    return res
+
+
 # --------------------------------------------------------------------------- tool-registrering
 # Wrappers registreres til sidst, saa modulet stadig eksponerer de synkrone
 # funktioner under deres egne navne (issue #23).
@@ -877,6 +991,8 @@ for _fn, _ann in (
     (wiki_stats, RO),
     (wiki_append, RW),
     (wiki_create, RW),
+    (wiki_commitments, RO),
+    (wiki_commit_add, RW),
 ):
     mcp.tool(annotations=_ann)(_threaded(_fn))
 
