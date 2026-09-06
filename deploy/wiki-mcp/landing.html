@@ -53,7 +53,8 @@ nav ul a:hover,nav ul a:focus-visible{color:var(--mist)}
 .hero .wrap{position:relative;display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}
 .hero p.lede{font-size:1.2rem;color:var(--muted);max-width:52ch;margin-top:22px}
 .hero .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
-.hero .facts{display:flex;gap:28px;flex-wrap:wrap;margin-top:40px;font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.hero .facts{display:grid;grid-template-columns:repeat(4,auto);justify-content:start;gap:28px;margin-top:40px;font-family:var(--mono);font-size:.76rem;color:var(--muted)}
+@media (max-width:520px){.hero .facts{grid-template-columns:repeat(2,auto)}}
 .hero .facts b{display:block;font-family:var(--display);font-size:1.5rem;color:var(--mist);font-weight:500;font-variant-numeric:tabular-nums}
 @media (max-width:900px){.hero .wrap{grid-template-columns:1fr}.hero{padding:64px 0 56px}}
 
@@ -82,7 +83,7 @@ section{padding:88px 0;border-bottom:1px solid var(--line)}
 
 /* pipeline diagram */
 .pipe{background:var(--ink);border:1px solid var(--line);border-radius:14px;padding:28px 24px;overflow-x:auto}
-.pipe svg{display:block;min-width:820px;width:100%;height:auto}
+.pipe svg{display:block;min-width:900px;width:100%;height:auto}
 .pipe text{font-family:var(--mono);font-size:12.5px;fill:var(--mist)}
 .pipe text.l{fill:var(--muted);font-size:11px}
 .pipe .box{fill:var(--panel);stroke:var(--line-strong)}
@@ -206,30 +207,30 @@ footer a{color:var(--muted)}
       <h2 style="margin-top:10px">Sources in, structure out, questions answered anywhere.</h2>
     </div>
     <div class="pipe rv">
-      <svg viewBox="0 0 900 300" role="img" aria-label="Pipeline: sources are ingested into the vault; the vault is served by MCP to every client; routines and lint keep it honest.">
+      <svg viewBox="0 0 1000 300" role="img" aria-label="Pipeline: sources are ingested into the vault; the vault is served by MCP to every client; routines and lint keep it honest.">
         <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5 0 10z" fill="#8F9BAB"/></marker></defs>
         <g>
-          <rect class="box" x="20" y="40" width="170" height="40" rx="8"/><text x="105" y="65" text-anchor="middle">email · IMAP export</text>
-          <rect class="box" x="20" y="95" width="170" height="40" rx="8"/><text x="105" y="120" text-anchor="middle">meetings · transcripts</text>
-          <rect class="box" x="20" y="150" width="170" height="40" rx="8"/><text x="105" y="175" text-anchor="middle">captures · mail / Telegram</text>
-          <rect class="box" x="20" y="205" width="170" height="40" rx="8"/><text x="105" y="230" text-anchor="middle">conversations · /wiki-save</text>
+          <rect class="box" x="20" y="40" width="200" height="40" rx="8"/><text x="120" y="65" text-anchor="middle">email · IMAP export</text>
+          <rect class="box" x="20" y="95" width="200" height="40" rx="8"/><text x="120" y="120" text-anchor="middle">meetings · transcripts</text>
+          <rect class="box" x="20" y="150" width="200" height="40" rx="8"/><text x="120" y="175" text-anchor="middle">captures · mail / Telegram</text>
+          <rect class="box" x="20" y="205" width="200" height="40" rx="8"/><text x="120" y="230" text-anchor="middle">conversations · /wiki-save</text>
         </g>
-        <path class="arrow flow" d="M190 60 C 240 60, 240 140, 290 140"/>
-        <path class="arrow flow" d="M190 115 C 240 115, 240 140, 290 140"/>
-        <path class="arrow flow" d="M190 170 C 240 170, 240 140, 290 140"/>
-        <path class="arrow flow" d="M190 225 C 240 225, 240 140, 290 140"/>
-        <rect class="box" x="290" y="110" width="140" height="60" rx="8"/><text x="360" y="135" text-anchor="middle">ingest routines</text><text class="l" x="360" y="153" text-anchor="middle">classify · link · cite</text>
-        <path class="arrow flow" d="M430 140 L 480 140"/>
-        <rect class="well" x="480" y="90" width="170" height="100" rx="14"/><text x="565" y="128" text-anchor="middle" style="font-family:Fraunces,serif;font-size:18px">the vault</text><text class="l" x="565" y="150" text-anchor="middle">markdown · frontmatter · git</text><text class="l" x="565" y="168" text-anchor="middle">_index · hubs · review-queue</text>
-        <path class="arrow flow" d="M650 140 L 700 140"/>
-        <rect class="box" x="700" y="110" width="120" height="60" rx="8"/><text x="760" y="135" text-anchor="middle">MCP server</text><text class="l" x="760" y="153" text-anchor="middle">stdio · http + token</text>
-        <path class="arrow" d="M820 125 C 850 110, 850 60, 880 60"/><text class="l" x="878" y="52" text-anchor="end">Claude Code</text>
-        <path class="arrow" d="M820 140 L 880 140"/><text class="l" x="878" y="132" text-anchor="end">Claude app · claude.ai</text>
-        <path class="arrow" d="M820 155 C 850 170, 850 220, 880 220"/><text class="l" x="878" y="235" text-anchor="end">other agents</text>
-        <rect class="box" x="480" y="230" width="170" height="40" rx="8"/><text x="565" y="255" text-anchor="middle">lint · freshness · eval</text>
-        <path class="arrow" d="M565 230 L 565 190"/>
-        <rect class="box" x="290" y="230" width="140" height="40" rx="8"/><text x="360" y="255" text-anchor="middle">weekly reflect</text>
-        <path class="arrow" d="M430 250 L 480 250"/>
+        <path class="arrow flow" d="M220 60 C 265 60, 265 140, 310 140"/>
+        <path class="arrow flow" d="M220 115 C 265 115, 265 140, 310 140"/>
+        <path class="arrow flow" d="M220 170 C 265 170, 265 140, 310 140"/>
+        <path class="arrow flow" d="M220 225 C 265 225, 265 140, 310 140"/>
+        <rect class="box" x="310" y="110" width="150" height="60" rx="8"/><text x="385" y="135" text-anchor="middle">ingest routines</text><text class="l" x="385" y="153" text-anchor="middle">classify · link · cite</text>
+        <path class="arrow flow" d="M460 140 L 500 140"/>
+        <rect class="well" x="500" y="88" width="210" height="104" rx="14"/><text x="605" y="126" text-anchor="middle" style="font-family:Fraunces,serif;font-size:19px">the vault</text><text class="l" x="605" y="150" text-anchor="middle">markdown · frontmatter · git</text><text class="l" x="605" y="168" text-anchor="middle">_index · hubs · review-queue</text>
+        <path class="arrow flow" d="M710 140 L 750 140"/>
+        <rect class="box" x="750" y="110" width="130" height="60" rx="8"/><text x="815" y="135" text-anchor="middle">MCP server</text><text class="l" x="815" y="153" text-anchor="middle">stdio · http + token</text>
+        <path class="arrow" d="M880 125 C 900 110, 900 60, 920 60"/><text class="l" x="928" y="64">Claude Code</text>
+        <path class="arrow" d="M880 140 L 920 140"/><text class="l" x="928" y="144">Claude app · claude.ai</text>
+        <path class="arrow" d="M880 155 C 900 170, 900 220, 920 220"/><text class="l" x="928" y="224">other agents</text>
+        <rect class="box" x="500" y="232" width="210" height="40" rx="8"/><text x="605" y="257" text-anchor="middle">lint · freshness · eval</text>
+        <path class="arrow" d="M605 232 L 605 192"/>
+        <rect class="box" x="310" y="232" width="150" height="40" rx="8"/><text x="385" y="257" text-anchor="middle">weekly reflect</text>
+        <path class="arrow" d="M460 252 L 500 252"/>
       </svg>
     </div>
   </div>
