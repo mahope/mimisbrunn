@@ -156,9 +156,19 @@ _schema.md         the rules — read this first
 
 `docs/automation-setup.md` covers the Claude Code hooks, the cloud routine templates (Claude Pro/Max) and the Dokploy services. Everything is optional; the vault works with nothing but Claude Code.
 
-## The name
+## Why "Mimisbrunn"
 
-Mímisbrunnr is the well of Mímir beneath a root of Yggdrasil — the well of wisdom and memory. Odin gave an eye for one drink. This is a smaller bargain: give your notes a schema and a librarian, and the well fills itself.
+In Norse myth, **Mímisbrunnr** — Mímir's well — lies beneath one of the three roots of Yggdrasil, the world tree. It is the well of wisdom and memory; Mímir, its keeper, is the wisest of all beings. Odin wanted a drink from it and paid the price the well demanded: one of his eyes. Later, when Mímir was beheaded, Odin preserved the head with herbs and spoke to it whenever he needed counsel. The head kept answering.
+
+Almost every part of that story maps onto what this project is trying to be:
+
+- **A well, not a warehouse.** Wisdom in the myth is something you draw from, again and again, not something you pile up. A second brain that is only written to and never queried is a warehouse. Mimisbrunn is built around the query: search lanes, an eval set, hooks that pull the right pages into every session.
+- **Under the root.** The well sits at the root of the tree that holds everything else up. This vault is meant to sit under your work the same way: the place your agents, routines and future sessions all reach into before they act.
+- **Mímir keeps it.** The well has a keeper who knows what is in it. Here the keeper is Claude Code with a schema and rules: it ingests, links, cites, flags contradictions and refuses to invent. The files stay yours; the keeper does the maintenance.
+- **The price is real.** Odin's eye is the honest part of the myth. Every second brain that survives has a cost of upkeep. Mimisbrunn tries to make that price small and explicit — lint, freshness, review queue, a weekly reflect pass — instead of pretending it is zero.
+- **The head still speaks.** Knowledge preserved with care keeps answering long after the conversation that produced it. That is why nothing is deleted, merges leave redirects, every fact carries a source and a date, and handovers let a new session pick up where the last one stopped.
+
+Also: it is short, it is not "brain" or "wiki" or "AI", and it is a Danish developer's project — the old Norse name felt more honest than another English SaaS-sounding one.
 
 ## Credits
 
