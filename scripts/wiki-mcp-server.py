@@ -533,6 +533,10 @@ def _http_app():
 
 
 def _pull_loop(interval: int) -> None:
+    """Pull main periodisk. Hvis selve server-scriptet ændrer sig (ny version pushet), genstart processen,
+    så deploy = git push uden redeploy af containeren."""
+    me = Path(__file__).resolve()
+    my_mtime = me.stat().st_mtime
     while True:
         time.sleep(interval)
         with LOCK:
@@ -542,6 +546,9 @@ def _pull_loop(interval: int) -> None:
         if r.returncode != 0:
             _git("rebase", "--abort")
         _refresh(force=True)
+        if me.stat().st_mtime != my_mtime:
+            print("wiki-mcp: server-scriptet er opdateret via git — genstarter", file=sys.stderr, flush=True)
+            os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 if __name__ == "__main__":
