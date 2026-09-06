@@ -35,8 +35,9 @@ ENTITIES = WIKI / "entities"
 MAX_PAGES = 4
 BUDGET_CHARS = 2400       # samlet budget for injiceret kontekst (ekskl. kritiske fakta)
 PER_PAGE_CHARS = 700
-MIN_SCORE = 6
-GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "users", "home"}
+MIN_SCORE = 4        # var 6; de fleste projekter fik kun kritiske fakta (issue #34)
+GENERIC = {"projects", "projekter", "freelance", "documents", "dokumenter", "src", "repos", "code",
+           "www", "app", "apps", "wiki", "users", "dev", "git", "kunder", "arbejde", "home"}
 
 
 def frontmatter(text):
@@ -55,7 +56,7 @@ def candidates(cwd: Path):
         p = part.lower()
         if p and p not in GENERIC and not re.match(r"^[a-z]:\\?$", p):
             names.append(p)
-        if len(names) >= 2:
+        if len(names) >= 3:      # var 2; kundenavnet ligger tit et niveau hoejere (issue #34)
             break
     try:
         r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=cwd, capture_output=True, text=True, timeout=5)
@@ -138,6 +139,24 @@ def commitment_lines(limit: int = 5):
     return ["[wiki-aftaler] Forfaldne eller nært forestående (kilde: _followup-queue.md):"] + picked[:limit]
 
 
+def log_run(cwd, names, hits, used):
+    """Én linje pr. sessionsstart i _index/context-hits.jsonl (gitignored).
+
+    Uden den kan spørgsmålet "hvor ofte finder hooket noget" ikke besvares (issue #34).
+    """
+    try:
+        rec = {"ts": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+               "cwd": str(cwd), "names": names,
+               "hits": [[h[1]["slug"], h[0]] for h in hits[:5]],
+               "n_hits": len(hits), "budget_used": used}
+        d = WIKI / "_index"
+        d.mkdir(exist_ok=True)
+        with open(d / "context-hits.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def main():
     try:
         payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
@@ -156,13 +175,16 @@ def main():
         aliases = [str(a).lower() for a in (row.get("aliases") or [])]
         resource = str(row.get("resource") or "").lower()
         desc = str(row.get("description") or "").lower()
+        tags = [str(t).lower() for t in (row.get("tags") or [])]
         score = 0
         for i, n in enumerate(names):
-            w = 3 - i
+            w = max(1, 3 - i)
             if resource and n in resource: score += 10 * w
             if slug == n or entity == n or n in aliases: score += 8 * w
             elif slug.startswith(n) or n in slug: score += 3 * w
+            elif n in tags: score += 3 * w
             elif re.search(rf"\b{re.escape(n)}\b", desc): score += 2 * w
+            elif len(n) > 5 and n in entity: score += 2 * w
         if score:
             hits.append((score, row))
     hits = [h for h in hits if h[0] >= MIN_SCORE]
@@ -174,6 +196,7 @@ def main():
         _, cbody = frontmatter(crit.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n"))
         out.append("[wiki-kritiske-fakta] " + re.sub(r"\s+", " ", cbody.replace("# Kritiske fakta (altid loaded)", "")).strip()[:900])
     if not hits:
+        log_run(cwd, names, [], 0)
         if out:
             print("\n".join(out))
         return 0
@@ -197,6 +220,7 @@ def main():
         out.append(text)
         used += len(text)
     out.append("Skriv ny varig viden tilbage (wiki_append via MCP 'wiki' eller /wiki-save) før sessionen slutter.")
+    log_run(cwd, names, hits, used)
     print("\n".join(out))
     return 0
 
