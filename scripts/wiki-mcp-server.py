@@ -20,6 +20,8 @@ Brug:
 
 import argparse
 import datetime as dt
+import functools
+import anyio
 import hashlib
 import hmac
 import importlib.util
@@ -41,6 +43,19 @@ except ImportError:  # pragma: no cover
     from yaml import SafeLoader as _YamlLoader
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+
+def _threaded(fn):
+    """Kør et synkront tool paa anyio's traadpool.
+
+    Alle tools var synkrone og kørte direkte paa event-loopet: ét langsomt kald
+    (kold modelload, git, fuld FTS-genopbygning) blokerede alle andre sessioner
+    imens (issue #23). De synkrone funktioner beholder deres navne, saa
+    wiki-cli.py og retrieval-eval.py kan kalde dem uden en event-loop.
+    """
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+    return wrapper
 
 RO = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 
@@ -114,6 +129,7 @@ ARCHIVED_STATUS = {"archived", "arkiveret", "afsluttet", "done", "completed", "i
 STOPWORDS = {"og", "i", "på", "af", "til", "en", "et", "de", "det", "den", "der", "som", "med", "for", "fra", "er", "har", "om", "hvem", "hvad", "hvor", "the", "and", "for", "med", "ved", "kan", "skal", "vi", "jeg", "min", "mit", "sin"}
 _FTS: sqlite3.Connection | None = None
 _FTS_DIRTY = True
+_FTS_LOCK = threading.Lock()   # sqlite-forbindelser er ikke traadsikre (issue #23)
 
 
 def _to_date(v):
@@ -146,7 +162,9 @@ def _is_stale(p: "Page") -> bool:
 def _fts_rebuild() -> None:
     """SQLite FTS5 (BM25) over entity/aliases/description/tags/body — i hukommelsen, genbygges ved ændringer."""
     global _FTS, _FTS_DIRTY
-    con = sqlite3.connect(":memory:")
+    # check_same_thread=False: forbindelsen bruges fra traadpoolen, ikke kun fra
+    # den traad der byggede den. Alle kald serialiseres af _FTS_LOCK (issue #23).
+    con = sqlite3.connect(":memory:", check_same_thread=False)
     con.execute("CREATE VIRTUAL TABLE fts USING fts5(slug UNINDEXED, entity, aliases, description, tags, body, tokenize='unicode61 remove_diacritics 0')")
     con.executemany("INSERT INTO fts VALUES (?,?,?,?,?,?)", [
         (p.slug, p.entity, " ".join(str(a) for a in (p.fm.get("aliases") or [])), str(p.fm.get("description", "")),
@@ -157,13 +175,15 @@ def _fts_rebuild() -> None:
 
 def _bm25(terms: list[str], limit: int = 50) -> list[str]:
     """Slugs rangeret efter BM25 med feltvægte entity 6 / aliases 5 / description 4 / tags 2 / body 1."""
-    if _FTS is None or _FTS_DIRTY:
-        _fts_rebuild()
     q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
-    try:
-        rows = _FTS.execute("SELECT slug FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 0, 6.0, 5.0, 4.0, 2.0, 1.0) LIMIT ?", (q, limit)).fetchall()
-    except sqlite3.OperationalError:
-        return []
+    with _FTS_LOCK:
+        if _FTS is None or _FTS_DIRTY:
+            _fts_rebuild()
+        con = _FTS
+        try:
+            rows = con.execute("SELECT slug FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 0, 6.0, 5.0, 4.0, 2.0, 1.0) LIMIT ?", (q, limit)).fetchall()
+        except sqlite3.OperationalError:
+            return []
     return [r[0] for r in rows]
 
 
@@ -171,6 +191,7 @@ def _bm25(terms: list[str], limit: int = 50) -> list[str]:
 _EMB_MODEL = None
 _EMB_MAT = None          # numpy-matrix (n, dim), normaliseret
 _EMB_KEYS: list[tuple[str, int]] = []   # (slug, chunk_idx) pr. række
+_EMB_SNAPSHOT: tuple | None = None      # (mat, keys) laest som ét hele af _semantic (issue #23)
 _EMB_DIRTY = True
 _EMB_LOCK = threading.Lock()
 _EMB_BUILDING = False
@@ -237,7 +258,7 @@ def _emb_refresh() -> None:
 
 
 def _emb_refresh_locked(model, np) -> None:
-    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY
+    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY, _EMB_SNAPSHOT
     EMB_DB.parent.mkdir(exist_ok=True)
     con = sqlite3.connect(EMB_DB)
     con.execute("CREATE TABLE IF NOT EXISTS emb (slug TEXT, idx INTEGER, hash TEXT, vec BLOB, PRIMARY KEY (slug, idx))")
@@ -266,10 +287,12 @@ def _emb_refresh_locked(model, np) -> None:
     con.close()
     if not rows:
         _EMB_MAT, _EMB_KEYS = None, []
+        _EMB_SNAPSHOT = (_EMB_MAT, _EMB_KEYS)
     else:
         mat = np.vstack([np.frombuffer(r[2], dtype=np.float32) for r in rows])
         norms = np.linalg.norm(mat, axis=1, keepdims=True); norms[norms == 0] = 1
         _EMB_MAT, _EMB_KEYS = mat / norms, [(r[0], r[1]) for r in rows]
+        _EMB_SNAPSHOT = (_EMB_MAT, _EMB_KEYS)
     _EMB_DIRTY = False
 
 
@@ -279,18 +302,21 @@ def _semantic(query: str, limit: int = 40) -> list[tuple[str, float]]:
     model = _emb_model()
     if model is None:
         return []
-    if _EMB_MAT is None:
-        # Første opbygning tager ~1 min for 900 sider — kør den i baggrunden og degradér til to lanes imens.
+    snap = _EMB_SNAPSHOT      # ét konsistent (mat, keys)-par; de to maa ikke laeses hver for sig
+    if snap is None:
+        # Første opbygning tager et par minutter for 900 sider — kør den i baggrunden
+        # og degradér til to lanes imens.
         if not _EMB_BUILDING:
             threading.Thread(target=_emb_refresh, daemon=True).start()
         return []
     if _EMB_DIRTY and not _EMB_BUILDING:
         threading.Thread(target=_emb_refresh, daemon=True).start()   # brug det gamle indeks nu, opdatér i baggrunden
+    mat, keys = snap
     q = np.asarray(next(iter(model.embed([query]))), dtype=np.float32)
     q = q / (np.linalg.norm(q) or 1)
-    sims = _EMB_MAT @ q
+    sims = mat @ q
     best: dict[str, float] = {}
-    for (slug, _), sim in zip(_EMB_KEYS, sims):
+    for (slug, _), sim in zip(keys, sims):
         if sim > best.get(slug, -1):
             best[slug] = float(sim)
     return sorted(best.items(), key=lambda x: -x[1])[:limit]
@@ -328,34 +354,60 @@ def _parse(path: Path) -> Page | None:
 
 
 def _refresh(force: bool = False) -> None:
-    """Re-scan changed files (cheap: 900 files, stat only unless changed)."""
-    global _INDEX_TIME, _FTS_DIRTY, _EMB_DIRTY, _ALIAS
-    with LOCK:
+    """Re-scan changed files (cheap: 900 files, stat only unless changed).
+
+    Indekset muteres aldrig paa stedet: der bygges en ny dict som byttes ind med
+    én tildeling. Laesere tager ét snapshot (`_INDEX`) og undgaar dermed
+    "dictionary changed size during iteration" naar pull-loopet opdaterer
+    samtidig med en soegning (issue #23)."""
+    global _INDEX, _INDEX_TIME, _FTS_DIRTY, _EMB_DIRTY, _ALIAS
+    # Hurtig vej uden laas: naar indekset er friskt nok, skal en soegning ikke
+    # staa i koe bag en igangvaerende genindlaesning (issue #23).
+    if not force and time.time() - _INDEX_TIME < 2:
+        return
+    if force:
+        LOCK.acquire()
+    elif not LOCK.acquire(blocking=False):
+        # En anden traad genindlaeser allerede. En laeser skal ikke staa i koe bag
+        # den; det nuvaerende snapshot er hoejst et par hundrede ms gammelt (issue #23).
+        return
+    try:
         if not force and time.time() - _INDEX_TIME < 2:
             return
-        seen = set()
+        current = _INDEX
+        fresh: dict[str, Page] = {}
+        changed = False
         for path in ENTITIES.glob("*/*.md"):
-            seen.add(path.stem)
-            cur = _INDEX.get(path.stem)
+            cur = current.get(path.stem)
             st = path.stat().st_mtime
-            if cur is None or cur.mtime != st or force:
-                p = _parse(path)
-                if p:
-                    _INDEX[path.stem] = p
-                    _FTS_DIRTY = True
-                    _EMB_DIRTY = True
-        for slug in list(_INDEX):
-            if slug not in seen:
-                del _INDEX[slug]
-                _FTS_DIRTY = True
-                _EMB_DIRTY = True
+            unchanged = cur is not None and cur.mtime == st
+            if unchanged and not force:
+                fresh[path.stem] = cur
+                continue
+            p = _parse(path)
+            if p:
+                fresh[path.stem] = p
+                # En tvungen genindlaesning af en ufaendret fil maa ikke markere
+                # FTS og embeddings som beskidte; ellers genopbygges de i ét vaek.
+                if not unchanged:
+                    changed = True
+            elif cur is not None:
+                fresh[path.stem] = cur
+        if len(fresh) != len(current):
+            changed = True
         alias: dict[str, str] = {}
-        for slug, page in _INDEX.items():
+        for slug, page in fresh.items():
             alias.setdefault(page.entity.lower(), slug)
             for a in (page.fm.get("aliases") or []):
                 alias.setdefault(str(a).lower(), slug)
+        _INDEX = fresh          # atomisk swap
         _ALIAS = alias
+        if changed:
+            _FTS_DIRTY = True
+            _EMB_DIRTY = True
         _INDEX_TIME = time.time()
+    finally:
+        LOCK.release()
 
 
 def _follow(p: "Page | None", hops: int = 0) -> "Page | None":
@@ -429,7 +481,6 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool(annotations=RO)
 def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -> list[dict]:
     """Søg i wikien. Returnerer kompakte hits (slug, type, entity, description, last_updated, path, score, snippet,
     stale) — hent detaljer med wiki_outline/wiki_get. `type` afgrænser til person|project|client|tool|place|concept|recipe.
@@ -513,7 +564,6 @@ def _sections(body: str) -> list[tuple[str, str]]:
     return out
 
 
-@mcp.tool(annotations=RO)
 def wiki_outline(slug: str) -> dict:
     """Billig oversigt over en side: frontmatter-hoved + hver ##-sektion med første linje og længde.
     Brug den før wiki_get for kun at hente den sektion du har brug for."""
@@ -527,7 +577,6 @@ def wiki_outline(slug: str) -> dict:
     return {**p.head(), "sources": p.fm.get("sources") or [], "sections": secs}
 
 
-@mcp.tool(annotations=RO)
 def wiki_get(slug: str, section: str = "", max_chars: int = 12000) -> dict:
     """Hent en side (eller kun én ##-sektion via `section`) ud fra slug, entitetsnavn eller alias.
     Citér som `path#heading` når du bruger indholdet."""
@@ -547,7 +596,6 @@ def wiki_get(slug: str, section: str = "", max_chars: int = 12000) -> dict:
             "resource": p.fm.get("resource"), "body": body[:max_chars], "truncated": truncated}
 
 
-@mcp.tool(annotations=RO)
 def wiki_related(slug: str) -> dict:
     """Udgående og indgående [[links]] for en side — brug til at følge relationer."""
     p = _resolve(slug)
@@ -561,7 +609,6 @@ def wiki_related(slug: str) -> dict:
     return {"slug": p.slug, "outbound": outbound, "inbound": inbound, "dead_links": missing, "semantic": semantic}
 
 
-@mcp.tool(annotations=RO)
 def wiki_recent(days: int = 7, limit: int = 25) -> list[dict]:
     """Sider ændret inden for N dage (efter last_updated i frontmatter). Godt til 'hvad er sket?'."""
     _refresh()
@@ -580,14 +627,12 @@ def wiki_recent(days: int = 7, limit: int = 25) -> list[dict]:
     return [p.head() for _, p in rows[:limit]]
 
 
-@mcp.tool(annotations=RO)
 def wiki_handover() -> str:
     """Seneste opgave-handover (_handovers/latest.md) — læs ved start af en session."""
     f = WIKI / "_handovers" / "latest.md"
     return f.read_text(encoding="utf-8") if f.exists() else "Ingen handover."
 
 
-@mcp.tool(annotations=RO)
 def wiki_stats() -> dict:
     """Antal sider pr. type, seneste ændringer og git-status for vaulten."""
     _refresh(force=True)
@@ -601,7 +646,6 @@ def wiki_stats() -> dict:
             "last_commits": log.stdout.strip().splitlines()}
 
 
-@mcp.tool(annotations=RW)
 def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> dict:
     """Tilføj ny viden til en eksisterende side. `text` er markdown (dansk). `section` er en ##-overskrift
     (oprettes hvis den mangler; tom = sidst på siden). `source` = fil-sti i _sources/ eller 'samtale YYYY-MM-DD'.
@@ -666,7 +710,6 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     return {"ok": True, "slug": p.slug, "git": git, "contradictions": contradictions}
 
 
-@mcp.tool(annotations=RW)
 def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
                 tags: list[str] | None = None, aliases: list[str] | None = None,
                 source: str = "", confidence: str = "medium", resource: str = "") -> dict:
@@ -819,6 +862,23 @@ def _pull_loop(interval: int) -> None:
                     time.sleep(0.1)
             os.execv(sys.executable, [sys.executable, *sys.argv])
 
+
+
+# --------------------------------------------------------------------------- tool-registrering
+# Wrappers registreres til sidst, saa modulet stadig eksponerer de synkrone
+# funktioner under deres egne navne (issue #23).
+for _fn, _ann in (
+    (wiki_search, RO),
+    (wiki_outline, RO),
+    (wiki_get, RO),
+    (wiki_related, RO),
+    (wiki_recent, RO),
+    (wiki_handover, RO),
+    (wiki_stats, RO),
+    (wiki_append, RW),
+    (wiki_create, RW),
+):
+    mcp.tool(annotations=_ann)(_threaded(_fn))
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
