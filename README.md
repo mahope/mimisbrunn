@@ -28,7 +28,9 @@ Brain: ✓ Updated [[acme-corp]] with new project info
 - **Context continuity** — `/wiki-learn` before compact, `/wiki-handover` for task state
 - **Dokploy service** template for 24/7 automation (email export, briefings, health checks)
 - **MCP server** — search/read/write the brain from Claude Code, the Claude app on your phone, and any MCP client (`deploy/wiki-mcp/`)
-- **Lint script** — dead links, orphans, duplicate slugs/aliases (`scripts/wiki-lint.py`)
+- **Lint scripts** — dead links, orphans, duplicate slugs (`scripts/wiki-lint.py`); frontmatter, `stale_after` per type, undated mutable values, missing provenance (`scripts/wiki-freshness.py`)
+- **Retrieval eval** — `scripts/retrieval-eval.py` measures recall@k / MRR of `wiki_search` against `scripts/eval/queries.yaml`, so ranking changes are safe
+- **Critical facts** — `_critical-facts.md` (~120 tokens of pointers) is injected into every Claude Code session
 
 ## Quick Start
 
@@ -131,6 +133,8 @@ python scripts/fix-wikilinks.py        # Dry-run: find plain-text → [[wikilink
 python scripts/fix-wikilinks.py --apply # Apply wikilink fixes
 python scripts/send-briefing.py        # Send pending briefings via Resend
 python scripts/wiki-lint.py            # Dead links, orphans, duplicate slugs
+python scripts/wiki-freshness.py       # Frontmatter, stale pages per type, undated values, missing sources
+python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search
 python scripts/wiki-mcp-server.py      # MCP server (stdio); --transport streamable-http for remote
 ```
 

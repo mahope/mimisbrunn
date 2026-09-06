@@ -23,7 +23,10 @@ import yaml
 
 WIKI = Path(__file__).resolve().parent.parent
 ENTITIES = WIKI / "entities"
-MAX_PAGES = 3
+MAX_PAGES = 4
+BUDGET_CHARS = 2400       # samlet budget for injiceret kontekst (ekskl. kritiske fakta)
+PER_PAGE_CHARS = 700
+MIN_SCORE = 6
 GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "users", "home"}
 
 
@@ -100,21 +103,38 @@ def main():
             elif re.search(rf"\b{re.escape(n)}\b", desc): score += 2 * w
         if score:
             hits.append((score, path, fm, body))
+    hits = [h for h in hits if h[0] >= MIN_SCORE]
+    out = []
+    crit = WIKI / "_critical-facts.md"
+    if crit.exists():
+        _, cbody = frontmatter(crit.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n"))
+        out.append("[wiki-kritiske-fakta] " + re.sub(r"\s+", " ", cbody.replace("# Kritiske fakta (altid loaded)", "")).strip()[:900])
     if not hits:
+        if out:
+            print("\n".join(out))
         return 0
     hits.sort(key=lambda h: -h[0])
-    out = ["[wiki-kontekst] Sider i LLM Wikien der matcher dette projekt (læs dem ved behov med Read):"]
+    out.append("[wiki-kontekst] Sider i LLM Wikien der matcher dette projekt (hent detaljer med wiki_outline/wiki_get):")
+    used = 0
     for score, path, fm, body in hits[:MAX_PAGES]:
+        if used >= BUDGET_CHARS:
+            break
+        block = []
         rel = path.relative_to(WIKI).as_posix()
-        out.append(f"- {fm.get('entity', path.stem)} ({fm.get('type', path.parent.name)}, opdateret {fm.get('last_updated', '?')}, confidence {fm.get('confidence', '?')}) -> {rel}")
+        block.append(f"- {fm.get('entity', path.stem)} ({fm.get('type', path.parent.name)}, opdateret {fm.get('last_updated', '?')}, confidence {fm.get('confidence', '?')}) -> {rel}")
         if fm.get("description"):
-            out.append(f"  {fm['description']}")
+            block.append(f"  {fm['description']}")
         ls = last_section(body)
         if ls:
-            out.append(f"  Seneste sektion — {ls}")
+            block.append(f"  Seneste sektion — {ls}")
         for l in recent_lines(body):
-            out.append(f"  {l}")
-    out.append("Skriv ny varig viden tilbage til disse sider (wiki_append via MCP 'wiki' eller /wiki-save) før sessionen slutter.")
+            block.append(f"  {l}")
+        text = "\n".join(block)
+        if len(text) > PER_PAGE_CHARS:
+            text = text[:PER_PAGE_CHARS].rsplit(" ", 1)[0] + " …"
+        out.append(text)
+        used += len(text)
+    out.append("Skriv ny varig viden tilbage (wiki_append via MCP 'wiki' eller /wiki-save) før sessionen slutter.")
     print("\n".join(out))
     return 0
 

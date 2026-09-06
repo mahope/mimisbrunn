@@ -1,0 +1,4 @@
+# Retrieval eval for wiki_search: query -> expected slugs (any in top-k counts as a hit).
+# Run: python scripts/retrieval-eval.py [--mode rrf|bm25|weighted]. Add a query every time a real search misses.
+- q: example client name
+  expect: [example-client]

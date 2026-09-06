@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -31,6 +32,10 @@ from pathlib import Path
 
 import yaml
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+RO = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+RW = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
 WIKI = Path(os.environ.get("WIKI_ROOT") or Path(__file__).resolve().parent.parent)
 ENTITIES = WIKI / "entities"
@@ -59,12 +64,69 @@ class Page:
             "slug": self.slug, "type": self.fm.get("type", self.folder), "entity": self.entity,
             "description": self.fm.get("description", ""), "last_updated": str(self.fm.get("last_updated", "")),
             "confidence": self.fm.get("confidence", ""), "tags": self.fm.get("tags") or [],
+            "path": str(self.path.relative_to(WIKI)).replace("\\", "/"), "stale": _is_stale(self),
         }
 
 
 _INDEX: dict[str, Page] = {}
 _INDEX_TIME = 0.0
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
+STALE_DEFAULT_DAYS = {"client": 60, "project": 60, "person": 120, "place": 365, "recipe": 365}
+ARCHIVED_STATUS = {"archived", "arkiveret", "afsluttet", "done", "completed", "inaktiv", "inactive", "lukket", "closed", "parkeret", "paused", "tidligere-kunde", "tabt", "lost"}
+STOPWORDS = {"og", "i", "på", "af", "til", "en", "et", "de", "det", "den", "der", "som", "med", "for", "fra", "er", "har", "om", "hvem", "hvad", "hvor", "the", "and", "for", "med", "ved", "kan", "skal", "vi", "jeg", "min", "mit", "sin"}
+_FTS: sqlite3.Connection | None = None
+_FTS_DIRTY = True
+
+
+def _to_date(v):
+    if isinstance(v, dt.datetime):
+        return v.date()
+    if isinstance(v, dt.date):
+        return v
+    if isinstance(v, str) and re.match(r"^\d{4}-\d{2}-\d{2}", v):
+        try:
+            return dt.date.fromisoformat(v[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _is_stale(p: "Page") -> bool:
+    """stale_after i frontmatter, ellers type-default; tool/concept forældes ikke."""
+    if str(p.fm.get("status", "")).lower() in ARCHIVED_STATUS:
+        return False
+    limit = _to_date(p.fm.get("stale_after"))
+    if limit is None:
+        lu = _to_date(p.fm.get("last_updated"))
+        days = STALE_DEFAULT_DAYS.get(str(p.fm.get("type", p.folder)))
+        if lu is None or days is None:
+            return False
+        limit = lu + dt.timedelta(days=days)
+    return dt.date.today() > limit
+
+
+def _fts_rebuild() -> None:
+    """SQLite FTS5 (BM25) over entity/aliases/description/tags/body — i hukommelsen, genbygges ved ændringer."""
+    global _FTS, _FTS_DIRTY
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE VIRTUAL TABLE fts USING fts5(slug UNINDEXED, entity, aliases, description, tags, body, tokenize='unicode61 remove_diacritics 0')")
+    con.executemany("INSERT INTO fts VALUES (?,?,?,?,?,?)", [
+        (p.slug, p.entity, " ".join(str(a) for a in (p.fm.get("aliases") or [])), str(p.fm.get("description", "")),
+         " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body) for p in _INDEX.values()])
+    con.commit()
+    _FTS, _FTS_DIRTY = con, False
+
+
+def _bm25(terms: list[str], limit: int = 50) -> list[str]:
+    """Slugs rangeret efter BM25 med feltvægte entity 6 / aliases 5 / description 4 / tags 2 / body 1."""
+    if _FTS is None or _FTS_DIRTY:
+        _fts_rebuild()
+    q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
+    try:
+        rows = _FTS.execute("SELECT slug FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 0, 6.0, 5.0, 4.0, 2.0, 1.0) LIMIT ?", (q, limit)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [r[0] for r in rows]
 
 
 def _parse(path: Path) -> Page | None:
@@ -88,7 +150,7 @@ def _parse(path: Path) -> Page | None:
 
 def _refresh(force: bool = False) -> None:
     """Re-scan changed files (cheap: 900 files, stat only unless changed)."""
-    global _INDEX_TIME
+    global _INDEX_TIME, _FTS_DIRTY
     with LOCK:
         if not force and time.time() - _INDEX_TIME < 2:
             return
@@ -101,9 +163,11 @@ def _refresh(force: bool = False) -> None:
                 p = _parse(path)
                 if p:
                     _INDEX[path.stem] = p
+                    _FTS_DIRTY = True
         for slug in list(_INDEX):
             if slug not in seen:
                 del _INDEX[slug]
+                _FTS_DIRTY = True
         _INDEX_TIME = time.time()
 
 
@@ -163,7 +227,8 @@ mcp = FastMCP(
     instructions=(
         "Personal LLM wiki (Obsidian vault). Call wiki_search before assuming anything about clients, "
         "people, projects, tools or concepts. Write durable new knowledge back with wiki_append "
-        "(existing page) or wiki_create (new entity). Never invent facts; mark uncertainty. "
+        "(existing page) or wiki_create (new entity). Work layered: wiki_search (compact) -> wiki_outline -> "
+        "wiki_get(section=...). Cite as path#heading. Never invent facts; mark uncertainty. "
         "Never store passwords or API keys."
     ),
     host=os.environ.get("WIKI_MCP_HOST", "0.0.0.0"),
@@ -171,26 +236,34 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
-def wiki_search(query: str, type: str = "", limit: int = 8) -> list[dict]:
-    """Fuldtekst-søgning i wikien. Returnerer de bedste sider med slug, type, beskrivelse og et uddrag.
-    `type` kan afgrænse til person|project|client|tool|place|concept|recipe."""
+@mcp.tool(annotations=RO)
+def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -> list[dict]:
+    """Søg i wikien. Returnerer kompakte hits (slug, type, entity, description, last_updated, path, score, snippet,
+    stale) — hent detaljer med wiki_outline/wiki_get. `type` afgrænser til person|project|client|tool|place|concept|recipe.
+    Ranking: BM25 (SQLite FTS5) + feltvægtet term-match fusioneret med Reciprocal Rank Fusion; forældede sider nedvægtes.
+    `mode` = rrf (default) | bm25 | weighted (til evaluering)."""
     _refresh()
-    terms = [t for t in re.split(r"\s+", query.lower().strip()) if t]
+    raw_terms = [t for t in re.split(r"\s+", query.lower().strip()) if t]
+    # Stopord/korte ord (i, og, på, af, en …) drukner signalet i term-match — behold dem kun hvis intet andet er tilbage.
+    terms = [t for t in raw_terms if len(t) > 2 and t not in STOPWORDS] or raw_terms
     if not terms:
         return []
-    scored = []
+
+    def allowed(p: Page) -> bool:
+        return not type or str(p.fm.get("type", p.folder)) == type or p.folder == FOLDERS.get(type, "")
+
+    weighted: list[tuple[float, Page]] = []
     for p in _INDEX.values():
-        if type and str(p.fm.get("type", p.folder)) != type and p.folder != FOLDERS.get(type, ""):
+        if not allowed(p):
             continue
-        ent = p.entity.lower(); slug = p.slug.lower()
+        ent = p.entity.lower(); slug = p.slug.lower(); slug_joined = slug.replace("-", "")
         aliases = " ".join(str(a) for a in (p.fm.get("aliases") or [])).lower()
         desc = str(p.fm.get("description", "")).lower()
         tags = " ".join(str(t) for t in (p.fm.get("tags") or [])).lower()
         body = p.body.lower()
         score = 0.0
         for t in terms:
-            if t in ent or t in slug: score += 10
+            if t in ent or t in slug or (len(t) > 6 and t in slug_joined): score += 10  # sammensatte ord: tilbudsskabelon ~ tilbuds-skabelon
             if t in aliases: score += 8
             if t in desc: score += 4
             if t in tags: score += 3
@@ -199,30 +272,86 @@ def wiki_search(query: str, type: str = "", limit: int = 8) -> list[dict]:
         if all(t in (ent + " " + aliases + " " + desc + " " + body) for t in terms):
             score += 3
         if score > 0:
-            scored.append((score, p))
+            weighted.append((score, p))
+    weighted.sort(key=lambda x: (-x[0], x[1].slug))
+    w_rank = {p.slug: i for i, (_, p) in enumerate(weighted)}
+    b_rank = {sl: i for i, sl in enumerate(sl for sl in _bm25(terms, 60) if sl in _INDEX and allowed(_INDEX[sl]))}
+
+    if mode == "weighted":
+        fused = {sl: 1.0 / (60 + r) for sl, r in w_rank.items()}
+    elif mode == "bm25":
+        fused = {sl: 1.0 / (60 + r) for sl, r in b_rank.items()}
+    else:
+        fused = {}
+        for sl, r in w_rank.items():
+            fused[sl] = fused.get(sl, 0.0) + 1.0 / (60 + r)
+        for sl, r in b_rank.items():
+            fused[sl] = fused.get(sl, 0.0) + 1.0 / (60 + r)
+    scored = []
+    for sl, sc in fused.items():
+        p = _INDEX[sl]
+        if _is_stale(p):
+            sc *= 0.7
+        scored.append((sc, p))
     scored.sort(key=lambda x: (-x[0], x[1].slug))
     out = []
-    for score, p in scored[: max(1, min(limit, 30))]:
-        d = p.head(); d["score"] = round(score, 1); d["snippet"] = _snippet(p.body, terms)
+    for sc, p in scored[: max(1, min(limit, 30))]:
+        d = p.head(); d["score"] = round(sc * 1000, 2); d["snippet"] = _snippet(p.body, terms, 160)
         out.append(d)
     return out
 
 
-@mcp.tool()
-def wiki_get(slug: str, max_chars: int = 12000) -> dict:
-    """Hent en hel wiki-side (frontmatter + brødtekst) ud fra slug, entitetsnavn eller alias."""
+def _sections(body: str) -> list[tuple[str, str]]:
+    """[(heading, text)] — første element er teksten før første ##-overskrift (heading '')."""
+    parts = re.split(r"\n(?=## )", "\n" + body)
+    out = []
+    for part in parts:
+        part = part.strip("\n")
+        if not part:
+            continue
+        if part.startswith("## "):
+            h, _, rest = part.partition("\n")
+            out.append((h[3:].strip(), rest.strip()))
+        else:
+            out.append(("", part.strip()))
+    return out
+
+
+@mcp.tool(annotations=RO)
+def wiki_outline(slug: str) -> dict:
+    """Billig oversigt over en side: frontmatter-hoved + hver ##-sektion med første linje og længde.
+    Brug den før wiki_get for kun at hente den sektion du har brug for."""
+    p = _resolve(slug)
+    if not p:
+        return {"error": f"Ingen side '{slug}'", "suggestions": [h["slug"] for h in wiki_search(slug, limit=5)]}
+    secs = []
+    for h, text in _sections(p.body):
+        first = re.sub(r"\s+", " ", text.split("\n")[0])[:140] if text else ""
+        secs.append({"heading": h or "(intro)", "chars": len(text), "first_line": first})
+    return {**p.head(), "sources": p.fm.get("sources") or [], "sections": secs}
+
+
+@mcp.tool(annotations=RO)
+def wiki_get(slug: str, section: str = "", max_chars: int = 12000) -> dict:
+    """Hent en side (eller kun én ##-sektion via `section`) ud fra slug, entitetsnavn eller alias.
+    Citér som `path#heading` når du bruger indholdet."""
     p = _resolve(slug)
     if not p:
         hits = wiki_search(slug, limit=5)
         return {"error": f"Ingen side '{slug}'", "suggestions": [h["slug"] for h in hits]}
     body = p.body
+    if section:
+        want = section.strip().lstrip("#").strip().lower()
+        match = [(h, t) for h, t in _sections(body) if h.lower() == want or want in h.lower()]
+        if not match:
+            return {"error": f"Ingen sektion '{section}'", "sections": [h for h, _ in _sections(body) if h]}
+        body = f"## {match[0][0]}\n\n{match[0][1]}"
     truncated = len(body) > max_chars
-    return {**p.head(), "path": str(p.path.relative_to(WIKI)).replace("\\", "/"),
-            "sources": p.fm.get("sources") or [], "aliases": p.fm.get("aliases") or [],
+    return {**p.head(), "sources": p.fm.get("sources") or [], "aliases": p.fm.get("aliases") or [],
             "resource": p.fm.get("resource"), "body": body[:max_chars], "truncated": truncated}
 
 
-@mcp.tool()
+@mcp.tool(annotations=RO)
 def wiki_related(slug: str) -> dict:
     """Udgående og indgående [[links]] for en side — brug til at følge relationer."""
     p = _resolve(slug)
@@ -235,7 +364,7 @@ def wiki_related(slug: str) -> dict:
     return {"slug": p.slug, "outbound": outbound, "inbound": inbound, "dead_links": missing}
 
 
-@mcp.tool()
+@mcp.tool(annotations=RO)
 def wiki_recent(days: int = 7, limit: int = 25) -> list[dict]:
     """Sider ændret inden for N dage (efter last_updated i frontmatter). Godt til 'hvad er sket?'."""
     _refresh()
@@ -252,14 +381,14 @@ def wiki_recent(days: int = 7, limit: int = 25) -> list[dict]:
     return [p.head() for _, p in rows[:limit]]
 
 
-@mcp.tool()
+@mcp.tool(annotations=RO)
 def wiki_handover() -> str:
     """Seneste opgave-handover (_handovers/latest.md) — læs ved start af en session."""
     f = WIKI / "_handovers" / "latest.md"
     return f.read_text(encoding="utf-8") if f.exists() else "Ingen handover."
 
 
-@mcp.tool()
+@mcp.tool(annotations=RO)
 def wiki_stats() -> dict:
     """Antal sider pr. type, seneste ændringer og git-status for vaulten."""
     _refresh(force=True)
@@ -273,7 +402,7 @@ def wiki_stats() -> dict:
             "last_commits": log.stdout.strip().splitlines()}
 
 
-@mcp.tool()
+@mcp.tool(annotations=RW)
 def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> dict:
     """Tilføj ny viden til en eksisterende side. `text` er markdown (dansk). `section` er en ##-overskrift
     (oprettes hvis den mangler; tom = sidst på siden). `source` = fil-sti i _sources/ eller 'samtale YYYY-MM-DD'.
@@ -317,7 +446,7 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     return {"ok": True, "slug": p.slug, "git": git}
 
 
-@mcp.tool()
+@mcp.tool(annotations=RW)
 def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
                 tags: list[str] | None = None, aliases: list[str] | None = None,
                 source: str = "", confidence: str = "medium", resource: str = "") -> dict:
