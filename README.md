@@ -30,6 +30,10 @@ Brain: ✓ Updated [[acme-corp]] with new project info
 - **MCP server** — search/read/write the brain from Claude Code, the Claude app on your phone, and any MCP client (`deploy/wiki-mcp/`)
 - **Lint scripts** — dead links, orphans, duplicate slugs (`scripts/wiki-lint.py`); frontmatter, `stale_after` per type, undated mutable values, missing provenance (`scripts/wiki-freshness.py`)
 - **Retrieval eval** — `scripts/retrieval-eval.py` measures recall@k / MRR of `wiki_search` against `scripts/eval/queries.yaml`, so ranking changes are safe
+- **Semantic search** — optional third RRF lane with local embeddings (`fastembed`, multilingual MiniLM); `WIKI_EMBED=0` disables it
+- **Merge tool + redirects** — `scripts/wiki-merge.py` never deletes; the source becomes a `type: redirect` stub that MCP follows
+- **Contradiction detection** — `wiki_append` flags conflicting email/phone/price/version/contact/hosting facts into a callout and `_review-queue.md`
+- **Hub pages** — `regen-index.py` writes `entities/_hubs/` from a small cluster config
 - **Critical facts** — `_critical-facts.md` (~120 tokens of pointers) is injected into every Claude Code session
 
 ## Quick Start
@@ -134,7 +138,9 @@ python scripts/fix-wikilinks.py --apply # Apply wikilink fixes
 python scripts/send-briefing.py        # Send pending briefings via Resend
 python scripts/wiki-lint.py            # Dead links, orphans, duplicate slugs
 python scripts/wiki-freshness.py       # Frontmatter, stale pages per type, undated values, missing sources
-python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search
+python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search (modes: rrf, bm25, weighted, semantic)
+python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub; --candidates lists likely duplicates
+python scripts/wiki_conflicts.py       # self-test of the contradiction detector used by wiki_append
 python scripts/wiki-mcp-server.py      # MCP server (stdio); --transport streamable-http for remote
 ```
 

@@ -20,6 +20,9 @@ Brug:
 
 import argparse
 import datetime as dt
+import hashlib
+import importlib.util
+import json
 import os
 import re
 import sqlite3
@@ -35,6 +38,17 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 RO = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+
+def _load_conflicts():
+    spec = importlib.util.spec_from_file_location("wiki_conflicts", Path(__file__).resolve().parent / "wiki_conflicts.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+try:
+    _CONFLICTS = _load_conflicts()
+except Exception:
+    _CONFLICTS = None
 RW = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
 WIKI = Path(os.environ.get("WIKI_ROOT") or Path(__file__).resolve().parent.parent)
@@ -59,6 +73,10 @@ class Page:
     def entity(self) -> str:
         return str(self.fm.get("entity") or self.slug)
 
+    @property
+    def is_redirect(self) -> bool:
+        return str(self.fm.get("type", "")) == "redirect"
+
     def head(self) -> dict:
         return {
             "slug": self.slug, "type": self.fm.get("type", self.folder), "entity": self.entity,
@@ -71,7 +89,7 @@ class Page:
 _INDEX: dict[str, Page] = {}
 _INDEX_TIME = 0.0
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
-STALE_DEFAULT_DAYS = {"client": 60, "project": 60, "person": 120, "place": 365, "recipe": 365}
+STALE_DEFAULT_DAYS = {"client": 180, "project": 60, "person": 365, "place": 365, "recipe": 365}
 ARCHIVED_STATUS = {"archived", "arkiveret", "afsluttet", "done", "completed", "inaktiv", "inactive", "lukket", "closed", "parkeret", "paused", "tidligere-kunde", "tabt", "lost"}
 STOPWORDS = {"og", "i", "på", "af", "til", "en", "et", "de", "det", "den", "der", "som", "med", "for", "fra", "er", "har", "om", "hvem", "hvad", "hvor", "the", "and", "for", "med", "ved", "kan", "skal", "vi", "jeg", "min", "mit", "sin"}
 _FTS: sqlite3.Connection | None = None
@@ -112,7 +130,7 @@ def _fts_rebuild() -> None:
     con.execute("CREATE VIRTUAL TABLE fts USING fts5(slug UNINDEXED, entity, aliases, description, tags, body, tokenize='unicode61 remove_diacritics 0')")
     con.executemany("INSERT INTO fts VALUES (?,?,?,?,?,?)", [
         (p.slug, p.entity, " ".join(str(a) for a in (p.fm.get("aliases") or [])), str(p.fm.get("description", "")),
-         " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body) for p in _INDEX.values()])
+         " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body) for p in _INDEX.values() if not p.is_redirect])
     con.commit()
     _FTS, _FTS_DIRTY = con, False
 
@@ -127,6 +145,105 @@ def _bm25(terms: list[str], limit: int = 50) -> list[str]:
     except sqlite3.OperationalError:
         return []
     return [r[0] for r in rows]
+
+
+# --------------------------------------------------------------------------- semantic lane (valgfri)
+_EMB_MODEL = None
+_EMB_MAT = None          # numpy-matrix (n, dim), normaliseret
+_EMB_KEYS: list[tuple[str, int]] = []   # (slug, chunk_idx) pr. række
+_EMB_DIRTY = True
+_EMB_DISABLED = os.environ.get("WIKI_EMBED", "1") == "0"
+EMBED_MODEL_NAME = os.environ.get("WIKI_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+EMB_DB = WIKI / "_index" / "embeddings.sqlite"
+
+
+def _emb_model():
+    global _EMB_MODEL, _EMB_DISABLED
+    if _EMB_DISABLED:
+        return None
+    if _EMB_MODEL is None:
+        try:
+            from fastembed import TextEmbedding
+            _EMB_MODEL = TextEmbedding(EMBED_MODEL_NAME)
+        except Exception as e:  # fastembed mangler eller model kan ikke hentes → to lanes
+            print(f"wiki-mcp: semantisk lane slået fra ({e.__class__.__name__}: {str(e)[:80]})", file=sys.stderr, flush=True)
+            _EMB_DISABLED = True
+            return None
+    return _EMB_MODEL
+
+
+def _chunks(p: "Page") -> list[str]:
+    head = f"{p.entity}. {p.fm.get('description', '')}"
+    body = p.body
+    if len(body) <= 4000:
+        return [f"{head}\n{body[:1500]}"]
+    out = [f"{head}\n{body[:1200]}"]
+    for h, t in _sections(body):
+        if h and t:
+            out.append(f"{p.entity} — {h}\n{t[:1200]}")
+    return out[:12]
+
+
+def _emb_refresh() -> None:
+    """Inkrementel: kun sider med ændret hash re-embeddes. Indeks i _index/embeddings.sqlite (gitignored)."""
+    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY
+    import numpy as np
+    model = _emb_model()
+    if model is None:
+        return
+    EMB_DB.parent.mkdir(exist_ok=True)
+    con = sqlite3.connect(EMB_DB)
+    con.execute("CREATE TABLE IF NOT EXISTS emb (slug TEXT, idx INTEGER, hash TEXT, vec BLOB, PRIMARY KEY (slug, idx))")
+    con.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
+    if (con.execute("SELECT v FROM meta WHERE k='model'").fetchone() or [None])[0] != EMBED_MODEL_NAME:
+        con.execute("DELETE FROM emb"); con.execute("INSERT OR REPLACE INTO meta VALUES ('model', ?)", (EMBED_MODEL_NAME,))
+    have = {(r[0], r[1]): r[2] for r in con.execute("SELECT slug, idx, hash FROM emb")}
+    todo: list[tuple[str, int, str, str]] = []
+    live = set()
+    for p in _INDEX.values():
+        if p.is_redirect:
+            continue
+        for i, text in enumerate(_chunks(p)):
+            h = hashlib.sha1(text.encode("utf-8")).hexdigest()
+            live.add((p.slug, i))
+            if have.get((p.slug, i)) != h:
+                todo.append((p.slug, i, h, text))
+    for key in set(have) - live:
+        con.execute("DELETE FROM emb WHERE slug=? AND idx=?", key)
+    if todo:
+        vecs = list(model.embed([t for _, _, _, t in todo], batch_size=64))
+        con.executemany("INSERT OR REPLACE INTO emb VALUES (?,?,?,?)",
+                        [(sl, i, h, np.asarray(v, dtype=np.float32).tobytes()) for (sl, i, h, _), v in zip(todo, vecs)])
+    con.commit()
+    rows = con.execute("SELECT slug, idx, vec FROM emb").fetchall()
+    con.close()
+    if not rows:
+        _EMB_MAT, _EMB_KEYS = None, []
+    else:
+        mat = np.vstack([np.frombuffer(r[2], dtype=np.float32) for r in rows])
+        norms = np.linalg.norm(mat, axis=1, keepdims=True); norms[norms == 0] = 1
+        _EMB_MAT, _EMB_KEYS = mat / norms, [(r[0], r[1]) for r in rows]
+    _EMB_DIRTY = False
+
+
+def _semantic(query: str, limit: int = 40) -> list[tuple[str, float]]:
+    """[(slug, cosine)] rangeret — bedste chunk pr. side."""
+    import numpy as np
+    model = _emb_model()
+    if model is None:
+        return []
+    if _EMB_DIRTY or _EMB_MAT is None:
+        _emb_refresh()
+    if _EMB_MAT is None:
+        return []
+    q = np.asarray(next(iter(model.embed([query]))), dtype=np.float32)
+    q = q / (np.linalg.norm(q) or 1)
+    sims = _EMB_MAT @ q
+    best: dict[str, float] = {}
+    for (slug, _), sim in zip(_EMB_KEYS, sims):
+        if sim > best.get(slug, -1):
+            best[slug] = float(sim)
+    return sorted(best.items(), key=lambda x: -x[1])[:limit]
 
 
 def _parse(path: Path) -> Page | None:
@@ -150,7 +267,7 @@ def _parse(path: Path) -> Page | None:
 
 def _refresh(force: bool = False) -> None:
     """Re-scan changed files (cheap: 900 files, stat only unless changed)."""
-    global _INDEX_TIME, _FTS_DIRTY
+    global _INDEX_TIME, _FTS_DIRTY, _EMB_DIRTY
     with LOCK:
         if not force and time.time() - _INDEX_TIME < 2:
             return
@@ -164,25 +281,35 @@ def _refresh(force: bool = False) -> None:
                 if p:
                     _INDEX[path.stem] = p
                     _FTS_DIRTY = True
+                    _EMB_DIRTY = True
         for slug in list(_INDEX):
             if slug not in seen:
                 del _INDEX[slug]
                 _FTS_DIRTY = True
+                _EMB_DIRTY = True
         _INDEX_TIME = time.time()
+
+
+def _follow(p: "Page | None", hops: int = 0) -> "Page | None":
+    """Følg redirect-stubs (type: redirect, redirect_to: slug), maks 3 hop."""
+    if p is None or not p.is_redirect or hops > 3:
+        return p
+    target = str(p.fm.get("redirect_to", "")).strip().lower()
+    return _follow(_INDEX.get(target), hops + 1) if target in _INDEX else p
 
 
 def _resolve(name: str) -> Page | None:
     _refresh()
     key = name.strip().lower().replace(" ", "-")
     if key in _INDEX:
-        return _INDEX[key]
+        return _follow(_INDEX[key])
     low = name.strip().lower()
     for p in _INDEX.values():
         if p.entity.lower() == low:
-            return p
+            return _follow(p)
         aliases = p.fm.get("aliases") or []
         if isinstance(aliases, list) and any(str(a).lower() == low for a in aliases):
-            return p
+            return _follow(p)
     return None
 
 
@@ -241,7 +368,7 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     """Søg i wikien. Returnerer kompakte hits (slug, type, entity, description, last_updated, path, score, snippet,
     stale) — hent detaljer med wiki_outline/wiki_get. `type` afgrænser til person|project|client|tool|place|concept|recipe.
     Ranking: BM25 (SQLite FTS5) + feltvægtet term-match fusioneret med Reciprocal Rank Fusion; forældede sider nedvægtes.
-    `mode` = rrf (default) | bm25 | weighted (til evaluering)."""
+    `mode` = rrf (default, tre lanes inkl. semantisk hvis embeddings findes) | bm25 | weighted | semantic (til evaluering)."""
     _refresh()
     raw_terms = [t for t in re.split(r"\s+", query.lower().strip()) if t]
     # Stopord/korte ord (i, og, på, af, en …) drukner signalet i term-match — behold dem kun hvis intet andet er tilbage.
@@ -250,6 +377,8 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
         return []
 
     def allowed(p: Page) -> bool:
+        if p.is_redirect:
+            return False
         return not type or str(p.fm.get("type", p.folder)) == type or p.folder == FOLDERS.get(type, "")
 
     weighted: list[tuple[float, Page]] = []
@@ -277,16 +406,22 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     w_rank = {p.slug: i for i, (_, p) in enumerate(weighted)}
     b_rank = {sl: i for i, sl in enumerate(sl for sl in _bm25(terms, 60) if sl in _INDEX and allowed(_INDEX[sl]))}
 
+    s_rank: dict[str, int] = {}
+    if mode in ("rrf", "semantic"):
+        s_rank = {sl: i for i, (sl, sim) in enumerate((sl, sim) for sl, sim in _semantic(query, 60)
+                                                          if sim >= 0.35 and sl in _INDEX and allowed(_INDEX[sl]))}
     if mode == "weighted":
         fused = {sl: 1.0 / (60 + r) for sl, r in w_rank.items()}
     elif mode == "bm25":
         fused = {sl: 1.0 / (60 + r) for sl, r in b_rank.items()}
+    elif mode == "semantic":
+        fused = {sl: 1.0 / (60 + r) for sl, r in s_rank.items()}
     else:
+        # RRF k=60; den semantiske lane vægtes 0,6 — den er stærk på omskrivninger men svag på egennavne.
         fused = {}
-        for sl, r in w_rank.items():
-            fused[sl] = fused.get(sl, 0.0) + 1.0 / (60 + r)
-        for sl, r in b_rank.items():
-            fused[sl] = fused.get(sl, 0.0) + 1.0 / (60 + r)
+        for lane, weight in ((w_rank, 1.0), (b_rank, 1.0), (s_rank, 0.6)):
+            for sl, r in lane.items():
+                fused[sl] = fused.get(sl, 0.0) + weight / (60 + r)
     scored = []
     for sl, sc in fused.items():
         p = _INDEX[sl]
@@ -361,7 +496,8 @@ def wiki_related(slug: str) -> dict:
     inbound = sorted(q.slug for q in _INDEX.values() if p.slug.lower() in q.links and q.slug != p.slug)
     outbound = sorted(l for l in p.links if l in _INDEX)
     missing = sorted(l for l in p.links if l not in _INDEX)
-    return {"slug": p.slug, "outbound": outbound, "inbound": inbound, "dead_links": missing}
+    semantic = [sl for sl, sim in _semantic(f"{p.entity}. {p.fm.get('description', '')}", 12) if sl != p.slug and sim >= 0.35][:6]
+    return {"slug": p.slug, "outbound": outbound, "inbound": inbound, "dead_links": missing, "semantic": semantic}
 
 
 @mcp.tool(annotations=RO)
@@ -406,7 +542,8 @@ def wiki_stats() -> dict:
 def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> dict:
     """Tilføj ny viden til en eksisterende side. `text` er markdown (dansk). `section` er en ##-overskrift
     (oprettes hvis den mangler; tom = sidst på siden). `source` = fil-sti i _sources/ eller 'samtale YYYY-MM-DD'.
-    Opdaterer last_updated og committer."""
+    Opdaterer last_updated og committer. Deterministiske modsigelser (e-mail, telefon, beløb, version, kontaktperson,
+    hosting) mod eksisterende tekst tilføjes som callout, logges i _review-queue.md og returneres som `contradictions`."""
     p = _resolve(slug)
     if not p:
         return {"error": f"Ingen side '{slug}' — brug wiki_create eller tjek stavning via wiki_search"}
@@ -429,6 +566,25 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
             fm_txt = re.sub(r"^sources:\s*\[\]\s*$", f"sources:\n  - {source}", fm_txt, flags=re.M)
         elif source.startswith("_sources/") and f"- {source}" not in fm_txt and re.search(r"^sources:\s*$", fm_txt, re.M):
             fm_txt = re.sub(r"^sources:\s*$", f"sources:\n  - {source}", fm_txt, flags=re.M)
+    contradictions = []
+    if _CONFLICTS is not None:
+        try:
+            compare_to = body
+            if section:
+                sec = [t for h, t in _sections(body) if h.lower() == section.strip().lstrip('#').strip().lower()]
+                compare_to = sec[0] if sec else body
+            contradictions = _CONFLICTS.find_conflicts(compare_to, text)
+        except Exception:
+            contradictions = []
+    if contradictions:
+        lines = "; ".join(f"{c['key']}: ny kilde siger \"{c['new']}\", siden sagde \"{c['old']}\"" for c in contradictions)
+        block += f"\n\n> [!warning] Modsigelse ({today}): {lines}"
+        rq = WIKI / "_review-queue.md"
+        rq_text = rq.read_text(encoding="utf-8") if rq.exists() else "# Review-kø\n"
+        if "## Modsigelser" not in rq_text:
+            rq_text = rq_text.rstrip("\n") + "\n\n## Modsigelser\n"
+        rq_text = rq_text.rstrip("\n") + f"\n- [ ] [[{p.slug}]] {today}: {lines}" + (f" (kilde: {source})" if source else "") + "\n"
+        rq.write_text(rq_text, encoding="utf-8", newline="\n")
     if section:
         header = f"## {section.strip().lstrip('#').strip()}"
         idx = body.find(header + "\n")
@@ -441,9 +597,10 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     else:
         body = body.rstrip("\n") + "\n\n" + block + "\n"
     p.path.write_text("---\n" + fm_txt + "\n---\n" + body, encoding="utf-8", newline="\n")
-    git = _commit([p.path], f"wiki: append {p.slug}")
+    paths = [p.path] + ([WIKI / "_review-queue.md"] if contradictions else [])
+    git = _commit(paths, f"wiki: append {p.slug}")
     _refresh(force=True)
-    return {"ok": True, "slug": p.slug, "git": git}
+    return {"ok": True, "slug": p.slug, "git": git, "contradictions": contradictions}
 
 
 @mcp.tool(annotations=RW)

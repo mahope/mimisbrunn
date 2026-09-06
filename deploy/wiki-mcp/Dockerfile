@@ -3,7 +3,10 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "mcp>=1.12,<2" pyyaml uvicorn starlette
+RUN pip install --no-cache-dir "mcp>=1.12,<2" pyyaml uvicorn starlette numpy fastembed
+# Hent embedding-modellen ind i imaget, så containeren ikke afhænger af HF Hub ved start
+ENV FASTEMBED_CACHE_PATH=/models
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
 
 WORKDIR /app
 COPY deploy/wiki-mcp/entrypoint.sh /app/entrypoint.sh

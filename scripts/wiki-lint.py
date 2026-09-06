@@ -21,6 +21,8 @@ except Exception:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = glob.glob(os.path.join(ROOT, "entities", "**", "*.md"), recursive=True)
+REDIRECT_RE = re.compile(r"^type:\s*redirect\s*$", re.M)
+REDIRECTS = {f for f in FILES if REDIRECT_RE.search(open(f, encoding="utf-8").read()[:600])}
 
 # Tabel-escapede pipes: gør "\|" til "|" FØR vi parser links, så
 # [[centic\|Centic]] læses som [[centic|Centic]] og target=centic.
@@ -87,7 +89,7 @@ for f in FILES:
             broken[t] += 1
             broken_src[t].add(os.path.relpath(f, ROOT))
 
-orphans = sorted(slug(f) for f in FILES if incoming[f] == 0)
+orphans = sorted(slug(f) for f in FILES if incoming[f] == 0 and f not in REDIRECTS)
 
 flag = sys.argv[1] if len(sys.argv) > 1 else "--all"
 print(f"# Wiki Lint — {len(FILES)} sider\n")
@@ -107,7 +109,7 @@ if flag in ("--all", "--orphans"):
     print()
 
 if flag in ("--all", "--dupes"):
-    dupes = {k: fs for k, fs in claims.items() if len(fs) > 1}
+    dupes = {k: fs for k, fs in claims.items() if len(fs - REDIRECTS) > 1}
     print(f"## Dublet-slugs/aliases: {len(dupes)} navne gør krav på flere filer (gør [[links]] tvetydige)")
     for k, fs in sorted(dupes.items()):
         print(f"  '{k}': " + " | ".join(os.path.relpath(f, ROOT) for f in sorted(fs)))

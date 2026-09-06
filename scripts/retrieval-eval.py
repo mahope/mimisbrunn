@@ -19,7 +19,7 @@ spec.loader.exec_module(srv)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="rrf", choices=["rrf", "bm25", "weighted"])
+    ap.add_argument("--mode", default="rrf", choices=["rrf", "bm25", "weighted", "semantic"])
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()

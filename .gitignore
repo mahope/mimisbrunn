@@ -20,3 +20,6 @@ Thumbs.db
 *.creds
 *.pem
 *.key
+
+# local embedding index (rebuilt automatically)
+_index/

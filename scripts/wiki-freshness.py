@@ -5,7 +5,7 @@ Freshness- og frontmatter-lint for wikien (supplerer wiki-lint.py, som dækker l
 Tjek:
   1. Frontmatter: påkrævede felter, type/mappe-match, gyldige datoer, description-længde, YAML-fejl.
   2. Staleness pr. type: `stale_after:` i frontmatter, ellers default pr. type
-     (client/project 60 dage, person 120, place/recipe 365, tool/concept aldrig).
+     (project 60 dage, client 180, person/place/recipe 365, tool/concept aldrig; status archived/parkeret m.fl. fritager).
   3. Freshness-disciplin ("timeless / dated / pointer", jf. obsidian-second-brain/OKF):
      linjer med foranderlige værdier (kr/DKK/%, versionsnumre, "kører på", IP-adresser)
      skal have en datomarkør på samme linje: (pr. YYYY-MM), [kilde: …], **D. måned YYYY**, YYYY-MM-DD.
@@ -30,8 +30,8 @@ FILES = sorted(glob.glob(os.path.join(ROOT, "entities", "*", "*.md")))
 TODAY = dt.date.today()
 REQ = ["entity", "type", "description", "sources", "confidence", "created", "last_updated", "tags"]
 FOLDER_TYPE = {"people": "person", "projects": "project", "clients": "client", "tools": "tool",
-               "places": "place", "concepts": "concept", "recipes": "recipe"}
-STALE_DEFAULT_DAYS = {"client": 60, "project": 60, "person": 120, "place": 365, "recipe": 365}
+               "places": "place", "concepts": "concept", "recipes": "recipe", "_hubs": "concept"}
+STALE_DEFAULT_DAYS = {"client": 180, "project": 60, "person": 365, "place": 365, "recipe": 365}
 FRESHNESS_TYPES = {"client", "project", "tool", "person"}
 ARCHIVED_STATUS = {"archived", "arkiveret", "afsluttet", "done", "completed", "inaktiv", "inactive", "lukket", "closed", "parkeret", "paused", "tidligere-kunde", "tabt", "lost"}
 
@@ -82,11 +82,15 @@ def check_all():
         if err:
             issues[err.split(":")[0]].append(f"{rel}: {err}")
             continue
+        if fm.get("type") == "redirect":
+            continue
         for k in REQ:
             if k not in fm:
                 issues[f"missing-{k}"].append(rel)
         t = fm.get("type")
-        if t and FOLDER_TYPE.get(folder) != t and t != "redirect":
+        if t == "redirect":
+            continue
+        if t and FOLDER_TYPE.get(folder) != t:
             issues["type-folder-mismatch"].append(f"{rel}: type={t}")
         for k in ("created", "last_updated", "stale_after"):
             if k in fm and to_date(fm[k]) is None:
