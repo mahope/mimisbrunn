@@ -24,6 +24,10 @@ try:
 except Exception:
     pass
 import yaml
+try:  # libyaml: ~8x hurtigere frontmatter-parsing (issue #19)
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover
+    from yaml import SafeLoader as _YamlLoader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FILES = sorted(glob.glob(os.path.join(ROOT, "entities", "*", "*.md")))
@@ -54,7 +58,7 @@ def parse(path):
     if not m:
         return None, raw, "no-frontmatter"
     try:
-        fm = yaml.safe_load(m.group(1)) or {}
+        fm = yaml.load(m.group(1), Loader=_YamlLoader) or {}
     except Exception as e:
         return None, raw[m.end():], f"yaml-error: {str(e).splitlines()[0][:80]}"
     return (fm if isinstance(fm, dict) else {}), raw[m.end():], None

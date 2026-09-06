@@ -25,6 +25,10 @@ def main():
     a = ap.parse_args()
     queries = yaml.safe_load(open(os.path.join(ROOT, "scripts", "eval", "queries.yaml"), encoding="utf-8"))
     srv._refresh(force=True)
+    # Byg den semantiske lane faerdig foer foerste query, ellers svarer den [] i
+    # starten og tallene bliver ikke-deterministiske (issue #27).
+    if a.mode in ("rrf", "semantic") and not srv._EMB_DISABLED:
+        srv._emb_refresh()
     hits = 0; rr = 0.0; misses = []
     for q in queries:
         res = srv.wiki_search(q["q"], limit=a.k, mode=a.mode)

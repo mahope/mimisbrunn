@@ -12,6 +12,7 @@ Markdown vault + Claude Code + MCP. Your AI ingests, links, cites and answers �
   <a href="#quick-start">Quick start</a> ·
   <a href="#mcp-server">MCP</a> ·
   <a href="#capture-from-anywhere">Capture</a> ·
+  <a href="#secrets-stay-out">Secrets</a> ·
   <a href="#why-mimisbrunn">The name</a>
 </p>
 
@@ -21,6 +22,7 @@ Markdown vault + Claude Code + MCP. Your AI ingests, links, cites and answers �
   <img alt="MCP" src="https://img.shields.io/badge/MCP-9%20tools-0B1220?style=flat-square">
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-0B1220?style=flat-square">
   <img alt="No database" src="https://img.shields.io/badge/databases-0-6BA98E?style=flat-square">
+  <img alt="Secret scanning" src="https://img.shields.io/badge/CI-gitleaks%20%2B%20trivy-6BA98E?style=flat-square">
 </p>
 
 ---
@@ -49,6 +51,7 @@ Mimisbrunn is the [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555
 | "Trust me" search | A query set and `retrieval-eval.py` report recall@5 / MRR before and after every ranking change |
 | Works in one app | MCP server: Claude Code, Claude app on your phone, claude.ai, any agent |
 | Grows until it rots | Freshness lint by type, `stale_after`, archived status, weekly reflect pass |
+| Secrets end up in git | A pre-commit hook blocks known key formats, and CI runs gitleaks and trivy on every push |
 
 ## What you get
 
@@ -57,6 +60,7 @@ Mimisbrunn is the [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555
 - **MCP server** — `scripts/wiki-mcp-server.py`: search (3 lanes, RRF-fused), outline, get (per section), related (links + semantic neighbours), recent, handover, stats, append (with contradiction check), create.
 - **Two hooks** — `wiki-context.py` injects critical facts and the pages matching the project you open; `wiki-autocommit.py` commits only the file you changed and never leaves a broken rebase.
 - **Quality tooling** — `wiki-lint.py` (dead links, orphans, duplicate slugs), `wiki-freshness.py` (frontmatter, stale pages, undated prices/versions, missing provenance), `wiki-merge.py` (merge with redirect stub, `--candidates`), `retrieval-eval.py`, `completeness-score.py`, `gen-dashboard.py`, `gen-graph.py`, generated hub pages.
+- **Security** — `.githooks/pre-commit` refuses staged Resend, GitHub, OpenAI, AWS, Slack, Google and Stripe keys and private key blocks; `.github/workflows/security.yml` runs gitleaks over the full history and the working tree, plus trivy for vulnerabilities and secrets, on every push and weekly.
 - **Cloud routines (templates)** — email ingest, Gmail ingest, tech-intel scanner, weekly digest, lint + calendar enrichment, knowledge radar, pre-meeting brief, inbox triage, weekly reflect.
 - **Deploy templates** — `deploy/wiki-agent/` (cron: email export, health checks, briefings), `deploy/wiki-mcp/` (MCP over HTTPS with a Bearer token, landing page), `deploy/wiki-inbox/` (Telegram capture bot).
 
@@ -120,6 +124,17 @@ Every fact is *timeless*, *dated* (`(as of 2026-09, source)`) or a *pointer* to 
 
 Search quality is measured, not assumed: `python scripts/retrieval-eval.py --mode rrf` runs `scripts/eval/queries.yaml` and prints recall@5 and MRR. Add a query every time a real search misses.
 
+Speed is measured too. On a 900-page vault, single core:
+
+| | |
+|---|---|
+| Full re-parse of every page | 181 ms |
+| `wiki_search`, term-match lane | 7.4 ms (p50) |
+| `wiki_search`, BM25 lane | 6.7 ms (p50) |
+| Incremental embedding update, one changed page | 30 ms |
+
+Frontmatter is parsed with libyaml, the lowercase fields every query needs are computed once at load, and generated hub pages are kept out of both indexes so they never crowd out a real answer.
+
 ## Capture from anywhere
 
 - **Mail** — create an alias like `brain@yourdomain` that delivers to your inbox; the inbox-triage routine files each mail on the right page or parks it in `_review-queue.md`. It never invents new pages.
@@ -155,6 +170,16 @@ _schema.md         the rules — read this first
 ## Automation
 
 `docs/automation-setup.md` covers the Claude Code hooks, the cloud routine templates (Claude Pro/Max) and the Dokploy services. Everything is optional; the vault works with nothing but Claude Code.
+
+## Secrets stay out
+
+A second brain reads your mail, your invoices and your servers, so the interesting question is not what it stores but what leaks. Three layers, none of them clever:
+
+1. **The schema forbids it.** Passwords, API keys and invoice amounts never go in a page. Pages point at the password manager instead.
+2. **The pre-commit hook blocks it.** `git config core.hooksPath .githooks` once, and staged changes containing a Resend, GitHub, OpenAI, AWS, Slack, Google or Stripe key, or a private key block, are refused before they reach a commit.
+3. **CI catches what slipped through.** gitleaks scans the full history and the working tree, trivy scans dependencies and files; both fail the build.
+
+The remote MCP server matches its Bearer token in constant time, exposes only `{"ok":true}` on the unauthenticated health endpoint, and passes its git credentials through a helper that reads the environment at call time, so no token is ever written into `.git/config` inside the container.
 
 ## Why "Mimisbrunn"
 

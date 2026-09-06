@@ -21,6 +21,7 @@ Brug:
 import argparse
 import datetime as dt
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -34,6 +35,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+try:  # libyaml er ~8x hurtigere: 435 ms -> 55 ms for 900 sider (issue #19)
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover
+    from yaml import SafeLoader as _YamlLoader
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
@@ -68,6 +73,15 @@ class Page:
     body: str
     mtime: float
     links: set = field(default_factory=set)
+    # Forudberegnet i _parse: uden dem lowercaser hver soegning 3,4 MB tekst paa ny (issue #20).
+    low_ent: str = ""
+    low_slug: str = ""
+    low_slug_joined: str = ""
+    low_alias: str = ""
+    low_desc: str = ""
+    low_tags: str = ""
+    low_body: str = ""
+    haystack: str = ""
 
     @property
     def entity(self) -> str:
@@ -76,6 +90,11 @@ class Page:
     @property
     def is_redirect(self) -> bool:
         return str(self.fm.get("type", "")) == "redirect"
+
+    @property
+    def is_generated(self) -> bool:
+        """Hub-sider m.fl.: de matcher mange termer, men er aldrig svaret (issue #27)."""
+        return bool(self.fm.get("generated"))
 
     def head(self) -> dict:
         return {
@@ -157,20 +176,32 @@ _EMB_BUILDING = False
 _EMB_DISABLED = os.environ.get("WIKI_EMBED", "1") == "0"
 EMBED_MODEL_NAME = os.environ.get("WIKI_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 EMB_DB = WIKI / "_index" / "embeddings.sqlite"
+# Batch og traade holdes lave: en kold build med batch_size=64 toppede paa 1,16 GB RSS
+# paa en 4 GB VPS med 2 vCPU (issue #21).
+EMBED_BATCH = int(os.environ.get("WIKI_EMBED_BATCH", "8"))
+EMBED_THREADS = int(os.environ.get("WIKI_EMBED_THREADS", "1"))
+
+
+_EMB_MODEL_LOCK = threading.Lock()
 
 
 def _emb_model():
+    """Single-flight load af ONNX-modellen: uden laasen kan opstartstraaden og et
+    tidligt request hver loade sin egen session og fordoble RSS (issue #21)."""
     global _EMB_MODEL, _EMB_DISABLED
     if _EMB_DISABLED:
         return None
-    if _EMB_MODEL is None:
-        try:
-            from fastembed import TextEmbedding
-            _EMB_MODEL = TextEmbedding(EMBED_MODEL_NAME)
-        except Exception as e:  # fastembed mangler eller model kan ikke hentes → to lanes
-            print(f"wiki-mcp: semantisk lane slået fra ({e.__class__.__name__}: {str(e)[:80]})", file=sys.stderr, flush=True)
-            _EMB_DISABLED = True
-            return None
+    if _EMB_MODEL is not None:
+        return _EMB_MODEL
+    with _EMB_MODEL_LOCK:
+        if _EMB_MODEL is None and not _EMB_DISABLED:
+            try:
+                from fastembed import TextEmbedding
+                _EMB_MODEL = TextEmbedding(EMBED_MODEL_NAME, threads=EMBED_THREADS)
+            except Exception as e:  # fastembed mangler eller model kan ikke hentes → to lanes
+                print(f"wiki-mcp: semantisk lane slået fra ({e.__class__.__name__}: {str(e)[:80]})", file=sys.stderr, flush=True)
+                _EMB_DISABLED = True
+                return None
     return _EMB_MODEL
 
 
@@ -216,7 +247,7 @@ def _emb_refresh_locked(model, np) -> None:
     todo: list[tuple[str, int, str, str]] = []
     live = set()
     for p in _INDEX.values():
-        if p.is_redirect:
+        if p.is_redirect or p.is_generated:
             continue
         for i, text in enumerate(_chunks(p)):
             h = hashlib.sha1(text.encode("utf-8")).hexdigest()
@@ -226,7 +257,7 @@ def _emb_refresh_locked(model, np) -> None:
     for key in set(have) - live:
         con.execute("DELETE FROM emb WHERE slug=? AND idx=?", key)
     if todo:
-        vecs = list(model.embed([t for _, _, _, t in todo], batch_size=64))
+        vecs = list(model.embed([t for _, _, _, t in todo], batch_size=EMBED_BATCH))
         con.executemany("INSERT OR REPLACE INTO emb VALUES (?,?,?,?)",
                         [(sl, i, h, np.asarray(v, dtype=np.float32).tobytes()) for (sl, i, h, _), v in zip(todo, vecs)])
     con.commit()
@@ -275,12 +306,24 @@ def _parse(path: Path) -> Page | None:
     m = re.match(r"---\n(.*?)\n---\n", raw, re.S)
     if m:
         try:
-            fm = yaml.safe_load(m.group(1)) or {}
+            fm = yaml.load(m.group(1), Loader=_YamlLoader) or {}
         except Exception:
             fm = {}
         body = raw[m.end():]
-    return Page(path=path, slug=path.stem, folder=path.parent.name, fm=fm if isinstance(fm, dict) else {},
-                body=body, mtime=path.stat().st_mtime, links={l.strip().lower() for l in LINK_RE.findall(body)})
+    if not isinstance(fm, dict):
+        fm = {}
+    slug = path.stem
+    low_ent = str(fm.get("entity") or slug).lower()
+    low_slug = slug.lower()
+    low_alias = " ".join(str(a) for a in (fm.get("aliases") or [])).lower()
+    low_desc = str(fm.get("description", "")).lower()
+    low_tags = " ".join(str(t) for t in (fm.get("tags") or [])).lower()
+    low_body = body.lower()
+    return Page(path=path, slug=slug, folder=path.parent.name, fm=fm,
+                body=body, mtime=path.stat().st_mtime, links={l.strip().lower() for l in LINK_RE.findall(body)},
+                low_ent=low_ent, low_slug=low_slug, low_slug_joined=low_slug.replace("-", ""),
+                low_alias=low_alias, low_desc=low_desc, low_tags=low_tags, low_body=low_body,
+                haystack=" ".join((low_ent, low_alias, low_desc, low_body)))
 
 
 def _refresh(force: bool = False) -> None:
@@ -343,12 +386,15 @@ def _snippet(body: str, terms: list[str], width: int = 220) -> str:
 
 
 # --------------------------------------------------------------------------- git
-def _git(*args: str) -> subprocess.CompletedProcess:
+def _git(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
     # stdin=DEVNULL + no terminal prompt: git-hooks (auto-push via ssh) må aldrig
     # arve MCP'ens stdio-transport, ellers hænger serveren.
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
-    return subprocess.run(["git", *args], cwd=WIKI, capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", stdin=subprocess.DEVNULL, env=env, timeout=120)
+    try:
+        return subprocess.run(["git", *args], cwd=WIKI, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", stdin=subprocess.DEVNULL, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args=["git", *args], returncode=124, stdout="", stderr="timeout")
 
 
 def _commit(paths: list[Path], message: str) -> str:
@@ -395,7 +441,7 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
         return []
 
     def allowed(p: Page) -> bool:
-        if p.is_redirect:
+        if p.is_redirect or p.is_generated:
             return False
         return not type or str(p.fm.get("type", p.folder)) == type or p.folder == FOLDERS.get(type, "")
 
@@ -403,20 +449,15 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     for p in _INDEX.values():
         if not allowed(p):
             continue
-        ent = p.entity.lower(); slug = p.slug.lower(); slug_joined = slug.replace("-", "")
-        aliases = " ".join(str(a) for a in (p.fm.get("aliases") or [])).lower()
-        desc = str(p.fm.get("description", "")).lower()
-        tags = " ".join(str(t) for t in (p.fm.get("tags") or [])).lower()
-        body = p.body.lower()
         score = 0.0
         for t in terms:
-            if t in ent or t in slug or (len(t) > 6 and t in slug_joined): score += 10  # sammensatte ord: tilbudsskabelon ~ tilbuds-skabelon
-            if t in aliases: score += 8
-            if t in desc: score += 4
-            if t in tags: score += 3
-            c = body.count(t)
+            if t in p.low_ent or t in p.low_slug or (len(t) > 6 and t in p.low_slug_joined): score += 10  # sammensatte ord: tilbudsskabelon ~ tilbuds-skabelon
+            if t in p.low_alias: score += 8
+            if t in p.low_desc: score += 4
+            if t in p.low_tags: score += 3
+            c = p.low_body.count(t)
             if c: score += min(c, 10) * 0.6
-        if all(t in (ent + " " + aliases + " " + desc + " " + body) for t in terms):
+        if all(t in p.haystack for t in terms):
             score += 3
         if score > 0:
             weighted.append((score, p))
@@ -525,6 +566,8 @@ def wiki_recent(days: int = 7, limit: int = 25) -> list[dict]:
     cutoff = dt.date.today() - dt.timedelta(days=days)
     rows = []
     for p in _INDEX.values():
+        if p.is_redirect or p.is_generated:
+            continue
         lu = p.fm.get("last_updated")
         if isinstance(lu, str):
             try: lu = dt.date.fromisoformat(lu[:10])
@@ -636,6 +679,11 @@ def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
     _refresh()
     if slug in _INDEX:
         return {"error": f"'{slug}' findes allerede i {_INDEX[slug].folder}/ — brug wiki_append"}
+    # _INDEX noegles paa filnavn: to filer med samme navn i hver sin mappe ville
+    # skiftes til at overskrive hinanden ved hver scanning (issue #27).
+    dupe = next((p for p in ENTITIES.glob(f"*/{slug}.md")), None)
+    if dupe is not None:
+        return {"error": f"'{slug}' findes allerede som {dupe.parent.name}/{slug}.md — vaelg et andet slug"}
     if len(description) > 220 or '"' in description or "\\" in description:
         return {"error": "description skal være ≤220 tegn uden anførselstegn/backslash"}
     if confidence not in ("high", "medium", "low"):
@@ -654,6 +702,7 @@ def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
     if source and not source.startswith("_sources/"):
         text += f"\n\n> Kilde: {source}"
     path = ENTITIES / FOLDERS[type] / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)  # foerste side af en ny type (issue #27)
     path.write_text("---\n" + "\n".join(fm) + "\n---\n\n" + text + "\n", encoding="utf-8", newline="\n")
     git = _commit([path], f"wiki: opret {slug}")
     _refresh(force=True)
@@ -688,9 +737,12 @@ def _http_app():
     class Auth(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             path = request.url.path
-            if path.startswith("/health"):
+            # Eksakt match: startswith("/health") gav ogsaa /healthz og alt andet med
+            # praefikset adgang uden auth (issue #28). Sideantallet er intern
+            # information og kraever nu token.
+            if path == "/health":
                 _refresh()
-                return JSONResponse({"ok": True, "pages": len(_INDEX)})
+                return JSONResponse({"ok": True})
             if request.method == "GET" and path in ("/", "/index.html"):
                 if landing.exists():
                     return HTMLResponse(landing.read_text(encoding="utf-8"))
@@ -698,8 +750,13 @@ def _http_app():
             if request.method == "GET" and path in ("/favicon.ico", "/robots.txt"):
                 return PlainTextResponse("User-agent: *\nDisallow: /mcp\n" if path == "/robots.txt" else "", status_code=200 if path == "/robots.txt" else 404)
             auth = request.headers.get("authorization", "")
-            if auth != f"Bearer {token}":
+            # constant-time: en almindelig streng-sammenligning laekker praefikslaengden
+            # gennem svartiden (issue #28).
+            if not hmac.compare_digest(auth, f"Bearer {token}"):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
+            if path == "/health/full":
+                _refresh()
+                return JSONResponse({"ok": True, "pages": len(_INDEX)})
             return await call_next(request)
 
     app = mcp.streamable_http_app()
@@ -707,24 +764,57 @@ def _http_app():
     return app
 
 
+_UVICORN_SERVER = None  # saettes naar http-transporten koerer (issue #22)
+
+
+def _script_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _pull_loop(interval: int) -> None:
     """Pull main periodisk. Hvis selve server-scriptet ændrer sig (ny version pushet), genstart processen,
     så deploy = git push uden redeploy af containeren."""
     me = Path(__file__).resolve()
-    my_mtime = me.stat().st_mtime
+    my_sha = _script_sha(me)
     while True:
         time.sleep(interval)
-        with LOCK:
-            if _git("status", "--short").stdout.strip():
-                continue
-        r = _git("pull", "--rebase", "-q", "origin", "main")
+        # LOCK holdes bevidst ikke over git-kald: et langsomt git ville ellers blokere
+        # baade /health og alle soegninger og give 502 gennem Cloudflares 100 s-loft (issue #24).
+        # Kun sporede aendringer taeller — untracked filer (indekser, midlertidige
+        # rapporter) maa ikke stoppe pull for evigt (issue #18).
+        dirty = _git("status", "--short", "--untracked-files=no", timeout=20).stdout.strip()
+        if dirty:
+            print(f"wiki-mcp: springer pull over, {len(dirty.splitlines())} sporede filer er ændret",
+                  file=sys.stderr, flush=True)
+            continue
+        r = _git("pull", "--rebase", "-q", "origin", "main", timeout=60)
         if r.returncode != 0:
-            _git("rebase", "--abort")
-        _refresh(force=True)
+            _git("rebase", "--abort", timeout=20)
+            print(f"wiki-mcp: pull fejlede ({r.returncode}): {r.stderr.strip()[:200]}", file=sys.stderr, flush=True)
+            continue
+        _refresh()
         if not _EMB_DISABLED:
             _emb_refresh()
-        if me.stat().st_mtime != my_mtime:
+        new_sha = _script_sha(me)
+        if new_sha != my_sha:
+            # SHA i stedet for mtime: en checkout af identisk indhold maa ikke genstarte.
+            # py_compile foerst, ellers giver et push med syntaksfejl en crashloop (issue #22).
+            probe = subprocess.run([sys.executable, "-m", "py_compile", str(me)],
+                                   capture_output=True, text=True, timeout=60)
+            if probe.returncode != 0:
+                print(f"wiki-mcp: ny version kompilerer ikke — beholder den koerende: "
+                      f"{probe.stderr.strip()[:300]}", file=sys.stderr, flush=True)
+                my_sha = new_sha  # log kun én gang pr. brudt version
+                continue
             print("wiki-mcp: server-scriptet er opdateret via git — genstarter", file=sys.stderr, flush=True)
+            # Lad aktive streams lukke foerst; ellers ser klienten en afbrudt forbindelse.
+            srv = _UVICORN_SERVER
+            if srv is not None:
+                srv.should_exit = True
+                for _ in range(50):
+                    if getattr(srv, "started", False) is False:
+                        break
+                    time.sleep(0.1)
             os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
@@ -733,7 +823,7 @@ if __name__ == "__main__":
     ap.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio")
     ap.add_argument("--pull-interval", type=int, default=0, help="sekunder mellem git pull (0 = aldrig)")
     args = ap.parse_args()
-    _refresh(force=True)
+    _refresh(force=True)  # koldstart: byg indekset fuldt
     if not _EMB_DISABLED:
         threading.Thread(target=_emb_refresh, daemon=True).start()   # varm den semantiske lane op
     if args.pull_interval > 0:
@@ -742,4 +832,9 @@ if __name__ == "__main__":
         mcp.run(transport="stdio")
     else:
         import uvicorn
-        uvicorn.run(_http_app(), host=mcp.settings.host, port=mcp.settings.port, log_level="info")
+        # timeout_keep_alive under Cloudflares 100 s, saa idle forbindelser lukkes af os
+        # og ikke af proxyen midt i en stream (issue #24).
+        config = uvicorn.Config(_http_app(), host=mcp.settings.host, port=mcp.settings.port,
+                                log_level="info", timeout_keep_alive=75)
+        _UVICORN_SERVER = uvicorn.Server(config)
+        _UVICORN_SERVER.run()

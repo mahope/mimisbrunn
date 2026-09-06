@@ -11,15 +11,13 @@ patterns=(
   'Slack token|xox[baprs]-[A-Za-z0-9-]{10,}'
   'Google API key|AIza[0-9A-Za-z_-]{35}'
   'Stripe live key|sk_live_[0-9a-zA-Z]{24,}'
+  'Hostinger/Bearer token|Bearer [A-Za-z0-9_\-]{40,}'
   'Private key block|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 )
 
 diff=$(git diff --cached --diff-filter=AM --no-color -U0 || true)
 added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
-
-if [ -z "$added" ]; then
-  exit 0
-fi
+[ -z "$added" ] && exit 0
 
 found=0
 for entry in "${patterns[@]}"; do
@@ -29,12 +27,12 @@ for entry in "${patterns[@]}"; do
   if [ -n "$match" ]; then
     found=1
     echo "BLOCKED: $name detected in staged changes:"
-    printf '%s\n' "$match" | sed 's/^/   /'
+    printf '%s\n' "$match" | cut -c1-40 | sed 's/^/   /;s/$/.../'
     echo
   fi
 done
 
 if [ "$found" -eq 1 ]; then
-  echo "Remove the secret before committing. Use 'git commit --no-verify' only if you are certain it's a false positive."
+  echo "Fjern hemmeligheden foer commit. Brug 'git commit --no-verify' kun ved sikker false positive."
   exit 1
 fi

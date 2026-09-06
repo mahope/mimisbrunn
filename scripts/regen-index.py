@@ -3,6 +3,10 @@
 import re, yaml
 from datetime import date
 from pathlib import Path
+try:  # libyaml: ~8x hurtigere frontmatter-parsing (issue #19)
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover
+    from yaml import SafeLoader as _YamlLoader
 
 wiki = Path(__file__).resolve().parent.parent
 categories = ["clients", "people", "projects", "tools", "concepts", "places", "recipes"]
@@ -13,7 +17,7 @@ def extract_frontmatter(content):
         return {}
     try:
         end = content.index("---", 3)
-        return yaml.safe_load(content[3:end].strip()) or {}
+        return yaml.load(content[3:end].strip(), Loader=_YamlLoader) or {}
     except Exception:
         return {}
 
@@ -45,23 +49,48 @@ HUBS = {
 HUB_WARN = 25
 
 
+def _hub_existing(path):
+    """(created, body uden last_updated) for en eksisterende hub-fil, ellers (None, None)."""
+    if not path.exists():
+        return None, None
+    txt = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    m = re.search(r"^created: (\d{4}-\d{2}-\d{2})$", txt, re.M)
+    created = m.group(1) if m else None
+    body = re.sub(r"^last_updated: \d{4}-\d{2}-\d{2}\n", "", txt, count=1, flags=re.M)
+    return created, body
+
+
 def write_hubs(pages):
-    """pages: liste af (cat, stem, name, fm). Skriver entities/_hubs/<cluster>.md idempotent."""
+    """pages: liste af (cat, stem, name, fm). Skriver entities/_hubs/<cluster>.md idempotent.
+
+    Skriver kun naar medlemslisten faktisk aendrer sig: `created` bevares fra den
+    eksisterende fil, og `last_updated` bumpes kun ved reelle aendringer. Ellers
+    efterlader hver koersel vaulten dirty (issue #18).
+    """
     hubdir = wiki / "entities" / "_hubs"
     hubdir.mkdir(exist_ok=True)
+    today = date.today().isoformat()
     links = []
     for key, (title, desc, match) in HUBS.items():
         members = sorted((stem, name, str(fm.get("description", "") or "")) for cat, stem, name, fm in pages if match(cat, fm))
-        lines = ["---", f'entity: "Hub: {title}"', "type: concept", f'description: "{desc} Genereret af regen-index.py; {len(members)} medlemmer."',
-                 f"aliases: [hub-{key}]", "sources: []", "confidence: high", "created: 2026-09-06", "last_updated: 2026-09-06",
-                 f"tags: [hub, generated]", "generated: true", "---", "", f"# Hub: {title}", "", f"> {desc} Genereres automatisk — redigér ikke i hånden.", "", "## Medlemmer", ""]
+        path = hubdir / f"hub-{key}.md"
+        created, prev_body = _hub_existing(path)
+        head = ["---", f'entity: "Hub: {title}"', "type: concept",
+                f'description: "{desc} Genereret af regen-index.py; {len(members)} medlemmer."',
+                f"aliases: [hub-{key}]", "sources: []", "confidence: high",
+                f"created: {created or today}"]
+        tail = ["tags: [hub, generated]", "generated: true", "---", "", f"# Hub: {title}", "",
+                f"> {desc} Genereres automatisk \u2014 redig\u00e9r ikke i h\u00e5nden.", "", "## Medlemmer", ""]
         for stem, name, d in members:
-            lines.append(f"- [[{stem}|{name}]]" + (f" — {d[:140]}" if d else ""))
-        lines += ["", "## Andre hubs", ""] + [f"- [[hub-{k2}|{t2}]]" for k2, (t2, _, _) in HUBS.items() if k2 != key] + [""]
-        (hubdir / f"hub-{key}.md").write_text("\n".join(lines), encoding="utf-8", newline="\n")
+            tail.append(f"- [[{stem}|{name}]]" + (f" \u2014 {d[:140]}" if d else ""))
+        tail += ["", "## Andre hubs", ""] + [f"- [[hub-{k2}|{t2}]]" for k2, (t2, _, _) in HUBS.items() if k2 != key] + [""]
+        body_wo_stamp = "\n".join(head + tail)
+        if prev_body != body_wo_stamp:
+            content = "\n".join(head + [f"last_updated: {today}"] + tail)
+            path.write_text(content, encoding="utf-8", newline="\n")
         links.append(f"- [[hub-{key}|{title}]] ({len(members)})")
         if len(members) > HUB_WARN:
-            print(f"ADVARSEL: hub {key} har {len(members)} medlemmer (> {HUB_WARN}) — overvej split")
+            print(f"ADVARSEL: hub {key} har {len(members)} medlemmer (> {HUB_WARN}) \u2014 overvej split")
     return links
 
 

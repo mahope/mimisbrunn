@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 
 import yaml
+try:  # libyaml: ~8x hurtigere frontmatter-parsing (issue #19)
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover
+    from yaml import SafeLoader as _YamlLoader
 
 WIKI = Path(__file__).resolve().parent.parent
 ENTITIES = WIKI / "entities"
@@ -35,7 +39,7 @@ def frontmatter(text):
     if not m:
         return {}, text
     try:
-        return (yaml.safe_load(m.group(1)) or {}), text[m.end():]
+        return (yaml.load(m.group(1), Loader=_YamlLoader) or {}), text[m.end():]
     except Exception:
         return {}, text[m.end():]
 

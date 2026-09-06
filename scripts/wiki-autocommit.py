@@ -62,6 +62,9 @@ def main() -> int:
         subprocess.run([sys.executable, str(WIKI / "scripts" / "regen-index.py")], cwd=WIKI,
                        capture_output=True, timeout=60)
         paths.append("_index.md")
+        # regen-index.py skriver ogsaa hub-siderne; uden dem her bliver arbejdskopien
+        # permanent dirty, og serverens pull-loop springer pull over (issue #18).
+        paths += sorted(p.relative_to(WIKI).as_posix() for p in (WIKI / "entities" / "_hubs").glob("hub-*.md"))
     git("add", "--", *[p for p in paths if (WIKI / p).exists()])
     if git("diff", "--cached", "--quiet").returncode == 0:
         return 0
