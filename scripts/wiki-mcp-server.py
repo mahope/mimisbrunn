@@ -1101,6 +1101,67 @@ def wiki_brief(limit_per_group: int = 5) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- prompts (issue #41)
+# Skills under /wiki-* findes kun på Mads' Windows-maskine. Prompts her virker mod
+# den samme server fra Claude Code, Claude-appen på telefonen og claude.ai.
+
+
+@mcp.prompt(name="daily_brief", title="Dagens overblik",
+            description="Forfaldne aftaler, forældede kunder og nyt i review-køen")
+def _p_daily_brief() -> str:
+    return (
+        "Kald wiki_brief() og skriv et kort dansk overblik ud fra svaret.\n\n"
+        "Struktur: 1) forfaldne aftaler med hvem og hvor mange dage over, 2) aftaler der forfalder "
+        "inden for 14 dage, 3) aktive kunder og projekter der er blevet forældede, med hvor længe siden, "
+        "4) nye punkter i review-køen. Maks 15 linjer i alt.\n\n"
+        "Slut med højst tre konkrete forslag til hvad Mads bør tage først, og hvorfor. "
+        "Opfind intet: står der ikke noget i svaret, så skriv at der ikke er noget."
+    )
+
+
+@mcp.prompt(name="before_meeting", title="Før et møde",
+            description="Alt wikien ved om en person eller kunde, plus åbne aftaler")
+def _p_before_meeting(navn: str) -> str:
+    return (
+        f"Mads skal snart møde '{navn}'. Saml det wikien ved, i denne rækkefølge:\n\n"
+        f"1. wiki_search('{navn}', limit=5) for at finde de rigtige sider. Er der flere kandidater, "
+        "så vælg den mest specifikke og nævn de andre kort.\n"
+        "2. wiki_outline(slug) og derefter wiki_get(slug, section=...) på de 2-3 sektioner der betyder noget. "
+        "Hent aldrig hele siden.\n"
+        f"3. wiki_commitments(person='{navn}') for åbne aftaler i begge retninger.\n\n"
+        "Skriv et dansk resumé på maks 20 linjer: hvem det er, de 3 seneste daterede fakta med dato, "
+        "åbne aftaler med frist, og 1-2 punkter Mads bør rejse. Citér sider som path#overskrift. "
+        "Findes personen ikke i wikien, så skriv det i stedet for at gætte."
+    )
+
+
+@mcp.prompt(name="what_did_i_promise", title="Hvad har jeg lovet",
+            description="Åbne aftaler, forfaldne først")
+def _p_promises(person: str = "") -> str:
+    who = f" der involverer '{person}'" if person else ""
+    return (
+        f"Kald wiki_commitments({'person=' + repr(person) + ', ' if person else ''}overdue=False) og vis alle åbne aftaler{who}.\n\n"
+        "Grupper dem: forfaldne først med antal dage over, så dem der forfalder inden for 14 dage, "
+        "så resten. Vis hvem der skylder hvem, hvad der er lovet, fristen og hvilken side det står på.\n\n"
+        "Er der forfaldne aftaler hvor Mads skylder noget, så foreslå en konkret næste handling for hver."
+    )
+
+
+@mcp.prompt(name="ingest_source", title="Ingest en kilde",
+            description="Skriv en mail, note eller samtale ind i wikien efter reglerne")
+def _p_ingest(tekst: str) -> str:
+    return (
+        "Skriv det væsentlige fra teksten nedenfor ind i wikien.\n\n"
+        "Regler: find først entiteten med wiki_search. Findes den, brug wiki_append med et dateret punkt "
+        "på formen '- **D. måned YYYY — emne:** destillat' og maks to linjer. Findes den ikke, så overvej "
+        "wiki_create — den afviser selv oprettelsen hvis noget ligner for meget, og viser kandidater. "
+        "Er der tale om et løfte eller en aftale, brug wiki_commit_add med en frist.\n\n"
+        "Skriv aldrig det samme på to sider: vælg den mest specifikke (projekt før kunde) og link fra de andre. "
+        "Gem aldrig passwords, API-nøgler eller konkrete fakturabeløb. Dansk tekst, engelske fagtermer.\n\n"
+        f"Tekst:\n\n{tekst}"
+    )
+
+
 # --------------------------------------------------------------------------- tool-registrering
 # Wrappers registreres til sidst, saa modulet stadig eksponerer de synkrone
 # funktioner under deres egne navne (issue #23).
