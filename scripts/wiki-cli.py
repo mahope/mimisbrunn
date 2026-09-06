@@ -45,6 +45,12 @@ def _out(obj, as_json: bool) -> None:
         return
     if isinstance(obj, list):
         for row in obj:
+            if isinstance(row, dict) and "what" in row:
+                due = f"forfald {row['due']}" if row.get("due") else "ingen frist"
+                if row.get("overdue_days"):
+                    due += f", {row['overdue_days']} dage over"
+                print(f"{row['owner']} -> {row['counterpart']}: {row['what']}  ({due})  [{row['slug']}]")
+                continue
             if isinstance(row, dict) and "slug" in row:
                 stale = " [stale]" if row.get("stale") else ""
                 print(f"{row['slug']}  ({row.get('type', '?')}){stale}  {str(row.get('description', ''))[:110]}")
@@ -75,6 +81,8 @@ def main() -> int:
     p = sub.add_parser("related"); p.add_argument("slug")
     p = sub.add_parser("recent"); p.add_argument("--days", type=int, default=7); p.add_argument("--limit", type=int, default=25)
     p = sub.add_parser("stats")
+    p = sub.add_parser("brief"); p.add_argument("--limit-per-group", type=int, default=5)
+    p = sub.add_parser("commitments"); p.add_argument("--person", default=""); p.add_argument("--overdue", action="store_true"); p.add_argument("--within-days", type=int, default=0)
     p = sub.add_parser("append"); p.add_argument("slug"); p.add_argument("text"); p.add_argument("--section", default=""); p.add_argument("--source", default="")
     p = sub.add_parser("create")
     p.add_argument("type"); p.add_argument("slug"); p.add_argument("entity"); p.add_argument("description"); p.add_argument("body")
@@ -96,6 +104,10 @@ def main() -> int:
         _out(srv.wiki_recent(days=a.days, limit=a.limit), a.json)
     elif a.cmd == "stats":
         _out(srv.wiki_stats(), a.json)
+    elif a.cmd == "brief":
+        _out(srv.wiki_brief(limit_per_group=a.limit_per_group), True)
+    elif a.cmd == "commitments":
+        _out(srv.wiki_commitments(person=a.person, overdue=a.overdue, within_days=a.within_days), a.json)
     elif a.cmd == "append":
         _out(srv.wiki_append(a.slug, a.text, section=a.section, source=a.source), a.json)
     elif a.cmd == "create":

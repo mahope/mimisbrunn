@@ -978,6 +978,62 @@ def wiki_commit_add(slug: str, what: str, due: str = "", agreed: str = "",
     return res
 
 
+def _recent_review_lines(limit: int = 5) -> list[str]:
+    """Nyeste ubehandlede punkter i _review-queue.md (modsigelser og kandidater)."""
+    rq = WIKI / "_review-queue.md"
+    if not rq.exists():
+        return []
+    out = []
+    try:
+        for line in rq.read_text(encoding="utf-8-sig").replace("\r\n", "\n").split("\n"):
+            t = line.strip()
+            if t.startswith("- [ ]"):
+                out.append(re.sub(r"\s+", " ", t[5:].strip())[:180])
+    except Exception:
+        return []
+    return out[-limit:]
+
+
+def wiki_brief(limit_per_group: int = 5) -> dict:
+    """Dagens overblik i ét kald: forfaldne og nært forestående aftaler, aktive kunder og
+    projekter der er blevet forældede, nyt i review-køen, og hvornår vaulten sidst blev rørt.
+
+    Beregnet til at blive kaldt i starten af en session eller før et møde, i stedet for at
+    lede flere steder. Hver gruppe er hårdt begrænset, så svaret kan læses på et skærmbillede."""
+    _refresh()
+    n = max(1, min(limit_per_group, 20))
+    commitments = wiki_commitments(limit=200)
+    overdue = [c for c in commitments if c["overdue_days"] > 0][:n]
+    soon_limit = dt.date.today() + dt.timedelta(days=14)
+    soon = [c for c in commitments
+            if c["overdue_days"] == 0 and c["due"] and (_to_date(c["due"]) or dt.date.max) <= soon_limit][:n]
+
+    stale = []
+    for p in _INDEX.values():
+        if p.is_redirect or p.is_generated or p.folder not in ("clients", "projects"):
+            continue
+        if str(p.fm.get("status", "")).lower() in ARCHIVED_STATUS or not _is_stale(p):
+            continue
+        stale.append({"slug": p.slug, "entity": p.entity, "type": str(p.fm.get("type", p.folder)),
+                      "last_updated": str(p.fm.get("last_updated", ""))})
+    stale.sort(key=lambda r: r["last_updated"])
+
+    recent = [p.head() for p in sorted(
+        (p for p in _INDEX.values() if not p.is_redirect and not p.is_generated),
+        key=lambda p: str(p.fm.get("last_updated", "")), reverse=True)[:n]]
+
+    return {
+        "date": dt.date.today().isoformat(),
+        "overdue_commitments": overdue,
+        "due_soon": soon,
+        "stale_active": stale[:n],
+        "review_queue": _recent_review_lines(n),
+        "recently_updated": recent,
+        "counts": {"commitments_open": len(commitments), "overdue": len([c for c in commitments if c["overdue_days"] > 0]),
+                   "stale_active": len(stale), "pages": len(_INDEX)},
+    }
+
+
 # --------------------------------------------------------------------------- tool-registrering
 # Wrappers registreres til sidst, saa modulet stadig eksponerer de synkrone
 # funktioner under deres egne navne (issue #23).
@@ -993,6 +1049,7 @@ for _fn, _ann in (
     (wiki_create, RW),
     (wiki_commitments, RO),
     (wiki_commit_add, RW),
+    (wiki_brief, RO),
 ):
     mcp.tool(annotations=_ann)(_threaded(_fn))
 

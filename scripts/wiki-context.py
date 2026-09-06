@@ -114,6 +114,30 @@ def load_pages():
     return rows
 
 
+def commitment_lines(limit: int = 5):
+    """Forfaldne og naert forestaaende aftaler fra den genererede _followup-queue.md.
+
+    Filen er lille, saa hooket kan laese den direkte i stedet for at loade MCP-serveren
+    (issue #39). Er den ikke genereret endnu, vises ingenting.
+    """
+    path = WIKI / "_followup-queue.md"
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    except Exception:
+        return []
+    picked, section = [], ""
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            section = line[3:].strip().lower()
+        elif line.startswith("- [ ] ") and ("forfaldne" in section or "14 dage" in section):
+            picked.append("  " + re.sub(r"\s+", " ", line[6:]).strip()[:200])
+    if not picked:
+        return []
+    return ["[wiki-aftaler] Forfaldne eller nært forestående (kilde: _followup-queue.md):"] + picked[:limit]
+
+
 def main():
     try:
         payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
@@ -143,6 +167,8 @@ def main():
             hits.append((score, row))
     hits = [h for h in hits if h[0] >= MIN_SCORE]
     out = []
+    for l in commitment_lines():
+        out.append(l)
     crit = WIKI / "_critical-facts.md"
     if crit.exists():
         _, cbody = frontmatter(crit.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n"))
