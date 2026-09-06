@@ -712,12 +712,71 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     return {"ok": True, "slug": p.slug, "git": git, "contradictions": contradictions}
 
 
+# --------------------------------------------------------------------------- entity resolution (issue #42)
+# Auto-ingest koerer dagligt og ville ellers oprette "Anna Katrin", "anna-katrin-noergaard"
+# og "Annas Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
+# fremfor at en cosine-graense alene afgoer sagen.
+DUPLICATE_SCORE = 0.72      # over denne: afvis oprettelse medmindre force=True.
+#                             Sat over den semantiske stoej mellem to tilfaeldige personsider
+#                             (maalt 0,64-0,65), saa kun rigtige dubletter blokerer.
+CANDIDATE_SCORE = 0.42      # over denne: vis som kandidat
+
+
+def _dup_candidates(entity: str, description: str, type_: str, aliases: list[str] | None = None) -> list[dict]:
+    """Muligt eksisterende match paa navn, alias og betydning. Score 0-1, hoejeste foerst."""
+    needle = " ".join(x for x in [entity, description] if x).strip()
+    if not needle:
+        return []
+    scored: dict[str, dict] = {}
+
+    def bump(slug: str, score: float, why: str) -> None:
+        row = scored.get(slug)
+        if row is None:
+            page = _INDEX.get(slug)
+            if page is None or page.is_redirect or page.is_generated:
+                return
+            row = scored[slug] = {"slug": slug, "entity": page.entity,
+                                  "type": str(page.fm.get("type", page.folder)),
+                                  "path": page.path.relative_to(WIKI).as_posix(),
+                                  "score": 0.0, "why": []}
+        if score > row["score"]:
+            row["score"] = score
+        if why not in row["why"]:
+            row["why"].append(why)
+
+    # 1. eksakt navn eller alias
+    for name in [entity] + list(aliases or []):
+        hit = _ALIAS.get(str(name).strip().lower())
+        if hit:
+            bump(hit, 1.0, "samme navn eller alias")
+
+    # 2. leksikalsk: samme ord i entity/beskrivelse
+    for row in wiki_search(needle, type=type_, limit=5, mode="weighted"):
+        bump(row["slug"], 0.55, "ligner leksikalsk")
+
+    # 3. semantisk, hvis lanen er varm
+    for slug, sim in _semantic(needle, limit=5):
+        if sim >= CANDIDATE_SCORE:
+            bump(slug, float(sim), f"semantisk naerhed {sim:.2f}")
+
+    out = sorted(scored.values(), key=lambda r: -r["score"])
+    for r in out:
+        r["score"] = round(r["score"], 2)
+        r["why"] = ", ".join(r["why"])
+    return [r for r in out if r["score"] >= CANDIDATE_SCORE][:5]
+
+
 def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
                 tags: list[str] | None = None, aliases: list[str] | None = None,
-                source: str = "", confidence: str = "medium", resource: str = "") -> dict:
+                source: str = "", confidence: str = "medium", resource: str = "",
+                force: bool = False) -> dict:
     """Opret en ny wiki-side. `type` ∈ person|project|client|tool|place|concept|recipe. `slug` = kebab-case
     filnavn uden .md. `description` = én sætning (≤180 tegn) om hvad entiteten ER. `body` = markdown der
-    starter med '# Titel'. Tjek FØRST med wiki_search at entiteten ikke findes."""
+    starter med '# Titel'.
+
+    Siden oprettes ikke hvis der findes en side der ligner nok: svaret indeholder da `candidates`
+    med slug, score og hvorfor, og forslaget er at bruge wiki_append på den bedste i stedet.
+    `force=True` opretter alligevel — brug den kun når kandidaterne beviseligt er andre entiteter."""
     if type not in FOLDERS:
         return {"error": f"Ugyldig type '{type}'"}
     slug = re.sub(r"[^a-z0-9-]", "-", slug.lower()).strip("-")
@@ -733,6 +792,14 @@ def wiki_create(type: str, slug: str, entity: str, description: str, body: str,
         return {"error": f"'{slug}' findes allerede som {dupe.parent.name}/{slug}.md — vaelg et andet slug"}
     if len(description) > 220 or '"' in description or "\\" in description:
         return {"error": "description skal være ≤220 tegn uden anførselstegn/backslash"}
+    candidates = _dup_candidates(entity, description, type, aliases)
+    if candidates and not force:
+        best = candidates[0]
+        if best["score"] >= DUPLICATE_SCORE:
+            return {"error": f"'{entity}' ligner en eksisterende side: {best['slug']} ({best['why']}).",
+                    "candidates": candidates,
+                    "suggestion": f"wiki_append('{best['slug']}', ...) — eller wiki_create(..., force=True) "
+                                  f"hvis det beviseligt er en anden entitet"}
     if confidence not in ("high", "medium", "low"):
         confidence = "medium"
     today = dt.date.today().isoformat()
