@@ -1,0 +1,52 @@
+filters:
+  and:
+    - 'open_commitments > 0'
+
+formulas:
+  dage_til_frist: 'if(next_due, (date(next_due) - today()).days, "")'
+  tilstand: 'if(next_due, if(date(next_due) < today(), "⚠️ over frist", "⏳ afventer"), "uden frist")'
+
+properties:
+  entity:
+    displayName: "Entitet"
+  type:
+    displayName: "Type"
+  open_commitments:
+    displayName: "Åbne aftaler"
+  next_due:
+    displayName: "Næste frist"
+  formula.dage_til_frist:
+    displayName: "Dage til frist"
+  formula.tilstand:
+    displayName: "Tilstand"
+
+views:
+  - type: table
+    name: "Åbne aftaler"
+    order:
+      - entity
+      - type
+      - open_commitments
+      - next_due
+      - formula.dage_til_frist
+      - formula.tilstand
+    summaries:
+      open_commitments: Sum
+
+  - type: table
+    name: "Over frist"
+    filters:
+      and:
+        - 'next_due'
+        - 'date(next_due) < today()'
+    order:
+      - entity
+      - next_due
+      - formula.dage_til_frist
+
+  - type: cards
+    name: "Hvem venter på hvad"
+    order:
+      - entity
+      - description
+      - formula.tilstand

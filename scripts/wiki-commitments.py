@@ -48,6 +48,42 @@ på entitetssiderne; ret dem der, ikke her. Formatet er beskrevet i `_schema.md`
 """
 
 
+def sync_frontmatter(rows) -> list[str]:
+    """Skriv `open_commitments` og `next_due` i frontmatter paa de sider der har aftaler.
+
+    Obsidian Bases kan kun filtrere paa frontmatter, ikke paa markdown-sektioner, saa uden
+    de to felter kan visningen ikke skelne sider med aftaler fra resten (issue #40).
+    Felterne fjernes igen naar den sidste aabne aftale paa siden er krydset af.
+    """
+    import re as _re
+    by_slug = {}
+    for c in rows:
+        cur = by_slug.setdefault(c["slug"], {"path": c["path"], "n": 0, "due": []})
+        cur["n"] += 1
+        if c["due"]:
+            cur["due"].append(c["due"])
+
+    touched = []
+    for path in sorted((ROOT / "entities").glob("*/*.md")):
+        slug = path.stem
+        text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+        m = _re.match(r"---\n(.*?)\n---\n", text, _re.S)
+        if not m:
+            continue
+        fm, body = m.group(1), text[m.end():]
+        info = by_slug.get(slug)
+        new_fm = _re.sub(r"^open_commitments:.*\n?", "", fm, flags=_re.M)
+        new_fm = _re.sub(r"^next_due:.*\n?", "", new_fm, flags=_re.M).rstrip("\n")
+        if info:
+            new_fm += f"\nopen_commitments: {info['n']}"
+            if info["due"]:
+                new_fm += f"\nnext_due: {min(info['due'])}"
+        if new_fm != fm:
+            path.write_text("---\n" + new_fm + "\n---\n" + body, encoding="utf-8", newline="\n")
+            touched.append(path.relative_to(ROOT).as_posix())
+    return touched
+
+
 def group(rows):
     """(forfaldne, inden for 14 dage, senere med dato, uden dato)."""
     soon = dt.date.today() + dt.timedelta(days=14)
@@ -80,6 +116,8 @@ def main() -> int:
     ap.add_argument("--include-done", action="store_true")
     ap.add_argument("--write", action="store_true", help="skriv _followup-queue.md")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--sync-frontmatter", action="store_true",
+                    help="skriv open_commitments og next_due i frontmatter (til Obsidian Bases)")
     a = ap.parse_args()
 
     rows = srv.wiki_commitments(person=a.person, include_done=a.include_done, limit=500)
@@ -98,6 +136,10 @@ def main() -> int:
     print(f"Aftaler i alt: {len(rows)}  (forfaldne {len(overdue)}, inden for 14 dage {len(upcoming)}, "
           f"senere {len(later)}, uden frist {len(undated)})")
     print(body)
+
+    if a.sync_frontmatter:
+        touched = sync_frontmatter(rows)
+        print(f"\nFrontmatter opdateret paa {len(touched)} sider" + (": " + ", ".join(touched) if touched else ""))
 
     if a.write:
         path = ROOT / "_followup-queue.md"

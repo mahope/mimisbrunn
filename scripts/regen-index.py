@@ -118,7 +118,9 @@ def get_summary(content):
             return clean[:100] + ("..." if len(clean) > 100 else "")
     return ""
 
-out = ["---", "title: Wiki Index", "description: Automatisk genereret indholdsfortegnelse", "---", "", "# Wiki Index", "", f"> Genereret automatisk fra `entities/`. Kør `python scripts/regen-index.py` for at opdatere.", ""]
+out = ["---", "title: Wiki Index", "description: Automatisk genereret indholdsfortegnelse", "---", "", "# Wiki Index", "", f"> Genereret automatisk fra `entities/`. Kør `python scripts/regen-index.py` for at opdatere.", "",
+       "**Visninger i Obsidian:** [[clients.base|Kunder]] · [[stale.base|Forældede sider]] · "
+       "[[commitments.base|Åbne aftaler]] · [[review.base|Til gennemgang]] (mappen `_bases/`).", ""]
 
 total = 0
 all_pages = []

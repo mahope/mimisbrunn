@@ -1,0 +1,62 @@
+filters:
+  and:
+    - file.inFolder("entities/clients")
+    - 'type != "redirect"'
+
+formulas:
+  dage_siden: 'if(last_updated, (today() - date(last_updated)).days, "")'
+  tilstand: 'if(status, status, "aktiv")'
+
+properties:
+  file.name:
+    displayName: "Side"
+  entity:
+    displayName: "Kunde"
+  description:
+    displayName: "Hvem er det"
+  last_updated:
+    displayName: "Opdateret"
+  formula.dage_siden:
+    displayName: "Dage siden"
+  formula.tilstand:
+    displayName: "Status"
+  confidence:
+    displayName: "Tillid"
+
+views:
+  - type: table
+    name: "Aktive kunder"
+    filters:
+      not:
+        - 'status == "archived"'
+        - 'status == "tidligere-kunde"'
+        - 'status == "tabt"'
+        - 'status == "parkeret"'
+    order:
+      - entity
+      - description
+      - last_updated
+      - formula.dage_siden
+      - confidence
+    summaries:
+      formula.dage_siden: Average
+
+  - type: table
+    name: "Tidligere og tabte"
+    filters:
+      or:
+        - 'status == "tidligere-kunde"'
+        - 'status == "tabt"'
+        - 'status == "archived"'
+    order:
+      - entity
+      - formula.tilstand
+      - description
+      - last_updated
+
+  - type: cards
+    name: "Alle kunder"
+    order:
+      - entity
+      - description
+      - formula.tilstand

@@ -1,0 +1,55 @@
+filters:
+  and:
+    - 'type != "redirect"'
+    - 'generated != true'
+    - file.inFolder("entities")
+
+formulas:
+  mangler_kilde: 'if(sources, false, true)'
+  dage_siden: 'if(last_updated, (today() - date(last_updated)).days, "")'
+
+properties:
+  entity:
+    displayName: "Entitet"
+  confidence:
+    displayName: "Tillid"
+  type:
+    displayName: "Type"
+  formula.dage_siden:
+    displayName: "Dage siden"
+
+views:
+  - type: table
+    name: "Lav tillid"
+    filters:
+      and:
+        - 'confidence == "low"'
+    order:
+      - entity
+      - type
+      - description
+      - last_updated
+    groupBy:
+      property: type
+      direction: ASC
+
+  - type: table
+    name: "Uden kilder"
+    limit: 100
+    filters:
+      and:
+        - 'formula.mangler_kilde == true'
+    order:
+      - entity
+      - type
+      - confidence
+      - last_updated
+
+  - type: table
+    name: "Nyeste ændringer"
+    limit: 30
+    order:
+      - entity
+      - type
+      - last_updated
+      - formula.dage_siden

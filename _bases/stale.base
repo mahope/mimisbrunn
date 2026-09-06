@@ -1,0 +1,61 @@
+filters:
+  and:
+    - 'type != "redirect"'
+    - 'generated != true'
+    - or:
+        - file.inFolder("entities/clients")
+        - file.inFolder("entities/projects")
+        - file.inFolder("entities/people")
+        - file.inFolder("entities/tools")
+
+formulas:
+  dage_siden: 'if(last_updated, (today() - date(last_updated)).days, "")'
+  graense: 'if(type == "project", 60, if(type == "client", 180, 365))'
+  over_graensen: 'if(last_updated, (today() - date(last_updated)).days - if(type == "project", 60, if(type == "client", 180, 365)), "")'
+  arkiveret: 'if(status == "archived" || status == "tidligere-kunde" || status == "tabt" || status == "parkeret" || status == "afsluttet", true, false)'
+
+properties:
+  entity:
+    displayName: "Entitet"
+  type:
+    displayName: "Type"
+  last_updated:
+    displayName: "Opdateret"
+  formula.dage_siden:
+    displayName: "Dage siden"
+  formula.graense:
+    displayName: "Grænse"
+  formula.over_graensen:
+    displayName: "Dage over"
+
+views:
+  - type: table
+    name: "Forældede"
+    filters:
+      and:
+        - 'formula.arkiveret == false'
+        - 'formula.over_graensen > 0'
+    order:
+      - entity
+      - type
+      - last_updated
+      - formula.dage_siden
+      - formula.over_graensen
+    groupBy:
+      property: type
+      direction: ASC
+    summaries:
+      formula.over_graensen: Max
+
+  - type: table
+    name: "Tættest på grænsen"
+    limit: 25
+    filters:
+      and:
+        - 'formula.arkiveret == false'
+        - 'formula.over_graensen <= 0'
+    order:
+      - entity
+      - type
+      - last_updated
+      - formula.over_graensen
