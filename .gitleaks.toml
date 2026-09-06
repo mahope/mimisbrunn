@@ -1,0 +1,11 @@
+# gitleaks configuration for this template.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Raw source archives are not committed in the template, but keep the paths allowlisted for forks"
+paths = [
+  '''^_sources/''',
+  '''^_intel/''',
+  '''^_digest/''',
+]
