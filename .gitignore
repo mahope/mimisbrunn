@@ -23,3 +23,6 @@ Thumbs.db
 
 # local embedding index (rebuilt automatically)
 _index/
+
+__pycache__/
+*.pyc
