@@ -1,4 +1,4 @@
-# CLAUDE.md — Second Brain
+# CLAUDE.md — Second Brain (Mimisbrunn)
 
 ## LLM Wiki — Persistent Knowledge Base
 
