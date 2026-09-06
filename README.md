@@ -12,7 +12,7 @@ Markdown vault + Claude Code + MCP. Your AI ingests, links, cites and answers �
   <a href="#quick-start">Quick start</a> ·
   <a href="#mcp-server">MCP</a> ·
   <a href="#capture-from-anywhere">Capture</a> ·
-  <a href="#the-name">The name</a>
+  <a href="#why-mimisbrunn">The name</a>
 </p>
 
 <p align="center">
