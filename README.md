@@ -27,6 +27,8 @@ Brain: ✓ Updated [[acme-corp]] with new project info
 - **Tech Intel Scanner** template — automated tech news briefings
 - **Context continuity** — `/wiki-learn` before compact, `/wiki-handover` for task state
 - **Dokploy service** template for 24/7 automation (email export, briefings, health checks)
+- **MCP server** — search/read/write the brain from Claude Code, the Claude app on your phone, and any MCP client (`deploy/wiki-mcp/`)
+- **Lint script** — dead links, orphans, duplicate slugs/aliases (`scripts/wiki-lint.py`)
 
 ## Quick Start
 
@@ -128,7 +130,23 @@ python scripts/gen-graph.py            # Generate relationship graph + analysis
 python scripts/fix-wikilinks.py        # Dry-run: find plain-text → [[wikilink]] opportunities
 python scripts/fix-wikilinks.py --apply # Apply wikilink fixes
 python scripts/send-briefing.py        # Send pending briefings via Resend
+python scripts/wiki-lint.py            # Dead links, orphans, duplicate slugs
+python scripts/wiki-mcp-server.py      # MCP server (stdio); --transport streamable-http for remote
 ```
+
+## MCP server — use the brain from every device
+
+`scripts/wiki-mcp-server.py` turns the vault into an MCP server (search, read, related, recent, handover, stats, append, create). Run it locally over stdio for Claude Code/Desktop, or deploy it with Docker (`deploy/wiki-mcp/`) so the Claude app on your phone, claude.ai and other agents can use the same brain behind a Bearer token.
+
+```bash
+claude mcp add wiki -s user -- python /path/to/vault/scripts/wiki-mcp-server.py
+```
+
+Live example: <https://wiki-mcp.mahoje.dk>. Setup: `deploy/wiki-mcp/SETUP.md`.
+
+Two hooks make Claude Code use the brain without being asked (see `docs/automation-setup.md`):
+- `scripts/wiki-context.py` (SessionStart) prints the wiki pages that match the project folder you open.
+- `scripts/wiki-autocommit.py` (PostToolUse) commits only the wiki file you changed — never `git add -A` — and aborts a failed rebase instead of leaving the vault broken.
 
 ## Automation Setup (optional)
 

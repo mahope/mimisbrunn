@@ -1,0 +1,28 @@
+services:
+  wiki-mcp:
+    build:
+      context: ../..
+      dockerfile: deploy/wiki-mcp/Dockerfile
+    restart: unless-stopped
+    # Secrets live in an env file on the Docker host (chmod 600), not in the Dokploy UI.
+    # If Dokploy itself runs in a container, the path must be under /etc/dokploy/ (shared with the host).
+    # Keys: GITHUB_TOKEN, WIKI_MCP_TOKEN, WIKI_REPO, WIKI_PULL_INTERVAL, WIKI_MCP_DOMAIN
+    env_file:
+      - /etc/dokploy/wiki-mcp.env
+    volumes:
+      - wiki-mcp-data:/wiki
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wiki-mcp.rule=Host(`${WIKI_MCP_DOMAIN}`)
+      - traefik.http.routers.wiki-mcp.entrypoints=websecure
+      - traefik.http.routers.wiki-mcp.tls.certresolver=letsencrypt
+      - traefik.http.services.wiki-mcp.loadbalancer.server.port=8765
+
+volumes:
+  wiki-mcp-data:
+
+networks:
+  dokploy-network:
+    external: true

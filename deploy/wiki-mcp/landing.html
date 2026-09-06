@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wiki-mcp</title><meta name="robots" content="noindex">
+<style>body{margin:0;background:#F7F8F5;color:#1F2A24;font:17px/1.55 system-ui,sans-serif}main{max-width:66ch;margin:0 auto;padding:56px 24px}h1{font-size:2.2rem;margin:0}code,pre{font-family:ui-monospace,Consolas,monospace;background:#EEF2EE}pre{padding:14px;overflow-x:auto}a{color:#3F7A4B}@media(prefers-color-scheme:dark){body{background:#151A17;color:#E4EAE5}code,pre{background:#1D2420}a{color:#7FC28C}}</style></head>
+<body><main>
+<h1>wiki-mcp</h1>
+<p>This server exposes a markdown second brain (Obsidian vault) over the Model Context Protocol. Tools: <code>wiki_search</code>, <code>wiki_get</code>, <code>wiki_related</code>, <code>wiki_recent</code>, <code>wiki_handover</code>, <code>wiki_stats</code>, <code>wiki_append</code>, <code>wiki_create</code>.</p>
+<p>Endpoint: <code>/mcp</code> (streamable HTTP). Everything except this page and <code>/health</code> requires a Bearer token.</p>
+<pre>claude mcp add --transport http wiki https://YOUR-DOMAIN/mcp \
+  --header "Authorization: Bearer &lt;token&gt;"</pre>
+<p>Built with <a href="https://github.com/mahope/second-brain-starter">Second Brain Starter</a>.</p>
+</main></body></html>

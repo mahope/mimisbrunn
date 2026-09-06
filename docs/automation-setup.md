@@ -4,9 +4,9 @@
 
 These work out of the box in any Claude Code session:
 
-- **PostToolUse (Edit/Write):** Auto-commits wiki changes + regenerates index
+- **PostToolUse (Edit/Write):** `scripts/wiki-autocommit.py` commits only the wiki file you changed (+ regenerated index). Never `git add -A`; a failed `pull --rebase` is aborted, not left half-done. Set `WIKI_AUTOPUSH=1` to push.
 - **PreCompact:** Auto-runs `/wiki-learn` before context compaction
-- **SessionStart:** Checks for active handover
+- **SessionStart:** Checks for active handover, and `scripts/wiki-context.py` prints the wiki pages that match the project folder you opened
 
 To enable, add to your `~/.claude/settings.json`:
 
@@ -30,7 +30,7 @@ To enable, add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "cd {{WIKI_PATH}} && python scripts/regen-index.py && git add -A && git diff --cached --quiet || git commit -m \"wiki: auto-update via Claude Code\"",
+            "command": "python {{WIKI_PATH}}/scripts/wiki-autocommit.py",
             "timeout": 30,
             "async": true
           }
