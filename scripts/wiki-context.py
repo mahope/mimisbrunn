@@ -4,7 +4,7 @@ SessionStart-hook: finder de wiki-sider der matcher det projekt Claude er åbnet
 og printer et kompakt kontekst-resumé (som injiceres i sessionen).
 
 Matching (i prioriteret rækkefølge):
-1. `resource:` i frontmatter indeholder repo-navnet (fx github.com/mahope/timetrack)
+1. `resource:` i frontmatter indeholder repo-navnet (e.g. github.com/you/your-app)
 2. mappenavnet er lig slug, entity eller et alias
 3. mappenavnet nævnes i description
 
@@ -36,7 +36,7 @@ MAX_PAGES = 4
 BUDGET_CHARS = 2400       # samlet budget for injiceret kontekst (ekskl. kritiske fakta)
 PER_PAGE_CHARS = 700
 MIN_SCORE = 6
-GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "mads_", "users"}
+GENERIC = {"projects", "freelance", "documents", "src", "repos", "code", "www", "app", "wiki", "users", "home"}
 
 
 def frontmatter(text):
