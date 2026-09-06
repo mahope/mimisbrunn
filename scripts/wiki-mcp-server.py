@@ -152,6 +152,8 @@ _EMB_MODEL = None
 _EMB_MAT = None          # numpy-matrix (n, dim), normaliseret
 _EMB_KEYS: list[tuple[str, int]] = []   # (slug, chunk_idx) pr. række
 _EMB_DIRTY = True
+_EMB_LOCK = threading.Lock()
+_EMB_BUILDING = False
 _EMB_DISABLED = os.environ.get("WIKI_EMBED", "1") == "0"
 EMBED_MODEL_NAME = os.environ.get("WIKI_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 EMB_DB = WIKI / "_index" / "embeddings.sqlite"
@@ -185,12 +187,25 @@ def _chunks(p: "Page") -> list[str]:
 
 
 def _emb_refresh() -> None:
-    """Inkrementel: kun sider med ændret hash re-embeddes. Indeks i _index/embeddings.sqlite (gitignored)."""
-    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY
+    """Inkrementel: kun sider med ændret hash re-embeddes. Indeks i _index/embeddings.sqlite (gitignored).
+    Kører under _EMB_LOCK; kald den fra en baggrundstråd (start + efter pull), aldrig inde i et request."""
+    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY, _EMB_BUILDING
     import numpy as np
     model = _emb_model()
     if model is None:
         return
+    if not _EMB_LOCK.acquire(blocking=False):
+        return  # en anden tråd bygger allerede
+    _EMB_BUILDING = True
+    try:
+        _emb_refresh_locked(model, np)
+    finally:
+        _EMB_BUILDING = False
+        _EMB_LOCK.release()
+
+
+def _emb_refresh_locked(model, np) -> None:
+    global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY
     EMB_DB.parent.mkdir(exist_ok=True)
     con = sqlite3.connect(EMB_DB)
     con.execute("CREATE TABLE IF NOT EXISTS emb (slug TEXT, idx INTEGER, hash TEXT, vec BLOB, PRIMARY KEY (slug, idx))")
@@ -232,10 +247,13 @@ def _semantic(query: str, limit: int = 40) -> list[tuple[str, float]]:
     model = _emb_model()
     if model is None:
         return []
-    if _EMB_DIRTY or _EMB_MAT is None:
-        _emb_refresh()
     if _EMB_MAT is None:
+        # Første opbygning tager ~1 min for 900 sider — kør den i baggrunden og degradér til to lanes imens.
+        if not _EMB_BUILDING:
+            threading.Thread(target=_emb_refresh, daemon=True).start()
         return []
+    if _EMB_DIRTY and not _EMB_BUILDING:
+        threading.Thread(target=_emb_refresh, daemon=True).start()   # brug det gamle indeks nu, opdatér i baggrunden
     q = np.asarray(next(iter(model.embed([query]))), dtype=np.float32)
     q = q / (np.linalg.norm(q) or 1)
     sims = _EMB_MAT @ q
@@ -703,6 +721,8 @@ def _pull_loop(interval: int) -> None:
         if r.returncode != 0:
             _git("rebase", "--abort")
         _refresh(force=True)
+        if not _EMB_DISABLED:
+            _emb_refresh()
         if me.stat().st_mtime != my_mtime:
             print("wiki-mcp: server-scriptet er opdateret via git — genstarter", file=sys.stderr, flush=True)
             os.execv(sys.executable, [sys.executable, *sys.argv])
@@ -714,6 +734,8 @@ if __name__ == "__main__":
     ap.add_argument("--pull-interval", type=int, default=0, help="sekunder mellem git pull (0 = aldrig)")
     args = ap.parse_args()
     _refresh(force=True)
+    if not _EMB_DISABLED:
+        threading.Thread(target=_emb_refresh, daemon=True).start()   # varm den semantiske lane op
     if args.pull_interval > 0:
         threading.Thread(target=_pull_loop, args=(args.pull_interval,), daemon=True).start()
     if args.transport == "stdio":

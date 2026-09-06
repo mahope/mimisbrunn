@@ -1,0 +1,22 @@
+services:
+  wiki-inbox:
+    build:
+      context: ../..
+      dockerfile: deploy/wiki-inbox/Dockerfile
+    restart: unless-stopped
+    # /etc/dokploy/wiki-inbox.env (chmod 600): TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_ID, GITHUB_TOKEN, WIKI_REPO, WHISPER_MODEL
+    env_file:
+      - /etc/dokploy/wiki-inbox.env
+    volumes:
+      - wiki-inbox-data:/wiki
+      - wiki-inbox-models:/models
+    networks:
+      - dokploy-network
+
+volumes:
+  wiki-inbox-data:
+  wiki-inbox-models:
+
+networks:
+  dokploy-network:
+    external: true
