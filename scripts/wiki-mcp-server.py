@@ -130,6 +130,8 @@ STOPWORDS = {"og", "i", "på", "af", "til", "en", "et", "de", "det", "den", "der
 _FTS: sqlite3.Connection | None = None
 _FTS_DIRTY = True
 _FTS_LOCK = threading.Lock()   # sqlite-forbindelser er ikke traadsikre (issue #23)
+_FTS_CHANGED: set[str] = set()   # slugs der skal genindsaettes (issue #25)
+_FTS_DELETED: set[str] = set()   # slugs der skal fjernes
 
 
 def _to_date(v):
@@ -185,6 +187,49 @@ def _fts_rebuild() -> None:
     _FTS, _FTS_DIRTY = con, False
 
 
+def _fts_rows(p: "Page"):
+    """(side-raekke, sektions-raekker) for én side."""
+    page_row = (p.slug, p.entity, " ".join(str(a) for a in (p.fm.get("aliases") or [])),
+                str(p.fm.get("description", "")), " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body)
+    sec_rows = []
+    if not p.is_generated:
+        for head, text in _sections(p.body):
+            if len(text.strip()) > 30:
+                sec_rows.append((p.slug, f"{p.entity} {head}", text))
+    return page_row, sec_rows
+
+
+def _fts_sync() -> None:
+    """Opdatér kun de sider der har aendret sig.
+
+    En fuld genopbygning koster 317 ms for 904 sider og 5.022 sektioner, og den blev
+    udloest ved hver eneste aendring. Inkrementelt er det ~1 ms pr. side (issue #25).
+    Kaldes under _FTS_LOCK."""
+    global _FTS_DIRTY
+    if _FTS is None:
+        _fts_rebuild()
+        _FTS_CHANGED.clear(); _FTS_DELETED.clear()
+        return
+    if not (_FTS_CHANGED or _FTS_DELETED):
+        _FTS_DIRTY = False
+        return
+    touched = (_FTS_CHANGED | _FTS_DELETED)
+    for slug in touched:
+        _FTS.execute("DELETE FROM fts WHERE slug = ?", (slug,))
+        _FTS.execute("DELETE FROM fts_sec WHERE slug = ?", (slug,))
+    for slug in _FTS_CHANGED:
+        p = _INDEX.get(slug)
+        if p is None or p.is_redirect:
+            continue
+        page_row, sec_rows = _fts_rows(p)
+        _FTS.execute("INSERT INTO fts VALUES (?,?,?,?,?,?)", page_row)
+        if sec_rows:
+            _FTS.executemany("INSERT INTO fts_sec VALUES (?,?,?)", sec_rows)
+    _FTS.commit()
+    _FTS_CHANGED.clear(); _FTS_DELETED.clear()
+    _FTS_DIRTY = False
+
+
 def _bm25_sections(terms: list[str], limit: int = 40) -> list[tuple[str, str]]:
     """[(slug, overskrift)] rangeret paa sektionsniveau, bedste sektion pr. side beholdes."""
     q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
@@ -192,7 +237,7 @@ def _bm25_sections(terms: list[str], limit: int = 40) -> list[tuple[str, str]]:
     seen = set()
     with _FTS_LOCK:
         if _FTS is None or _FTS_DIRTY:
-            _fts_rebuild()
+            _fts_sync()
         try:
             rows = _FTS.execute(
                 "SELECT slug, heading FROM fts_sec WHERE fts_sec MATCH ? "
@@ -214,7 +259,7 @@ def _bm25(terms: list[str], limit: int = 50) -> list[str]:
     q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
     with _FTS_LOCK:
         if _FTS is None or _FTS_DIRTY:
-            _fts_rebuild()
+            _fts_sync()
         con = _FTS
         try:
             rows = con.execute("SELECT slug FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 0, 6.0, 5.0, 4.0, 2.0, 1.0) LIMIT ?", (q, limit)).fetchall()
@@ -427,8 +472,12 @@ def _refresh(force: bool = False) -> None:
                 # FTS og embeddings som beskidte; ellers genopbygges de i ét vaek.
                 if not unchanged:
                     changed = True
+                    _FTS_CHANGED.add(path.stem)
             elif cur is not None:
                 fresh[path.stem] = cur
+        gone = set(current) - set(fresh)
+        if gone:
+            _FTS_DELETED.update(gone)
         if len(fresh) != len(current):
             changed = True
         alias: dict[str, str] = {}
