@@ -49,6 +49,7 @@ Mimisbrunn is the [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555
 | Vector DB you have to run | SQLite FTS5 + optional local embeddings, rebuilt from the files |
 | Facts overwrite each other | Contradictions become callouts and a review queue; nothing is deleted, merges leave redirects |
 | "Trust me" search | A query set and `retrieval-eval.py` report recall@5 / MRR before and after every ranking change |
+| A patch quietly deletes half the server | `selftest.py` asserts the exact tool and prompt surface on every push; a missing function is a red build, not a surprise a week later |
 | Works in one app | MCP server: Claude Code, Claude app on your phone, claude.ai, any agent |
 | Grows until it rots | Freshness lint by type, `stale_after`, archived status, weekly reflect pass |
 | Secrets end up in git | A pre-commit hook blocks known key formats, and CI runs gitleaks and trivy on every push |
@@ -59,7 +60,7 @@ Mimisbrunn is the [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555
 - **9 Claude Code skills** — `/wiki-save`, `/wiki-query`, `/wiki-ingest`, `/wiki-auto-ingest`, `/wiki-lint`, `/wiki-review`, `/wiki-learn`, `/wiki-handover`, `/wiki-resume` — plus `/wiki-import` for ChatGPT, Claude, LinkedIn, Facebook, Google Takeout and Notion exports.
 - **MCP server** — `scripts/wiki-mcp-server.py`: search (3 lanes, RRF-fused), outline, get (per section), related (links + semantic neighbours), recent, handover, stats, append (with contradiction check), create.
 - **Two hooks** — `wiki-context.py` injects critical facts and the pages matching the project you open; `wiki-autocommit.py` commits only the file you changed and never leaves a broken rebase.
-- **Quality tooling** — `wiki-lint.py` (dead links, orphans, duplicate slugs), `wiki-freshness.py` (frontmatter, stale pages, undated prices/versions, missing provenance), `wiki-merge.py` (merge with redirect stub, `--candidates`), `retrieval-eval.py`, `completeness-score.py`, `gen-dashboard.py`, `gen-graph.py`, generated hub pages.
+- **Quality tooling** — `wiki-lint.py` (dead links, orphans, duplicate slugs), `wiki-freshness.py` (frontmatter, stale pages, undated prices/versions, missing provenance), `wiki-merge.py` (merge with redirect stub, `--candidates`), `retrieval-eval.py`, `answer-eval.py`, `selftest.py`, `completeness-score.py`, `gen-dashboard.py`, `gen-graph.py`, generated hub pages.
 - **Security** — `.githooks/pre-commit` refuses staged Resend, GitHub, OpenAI, AWS, Slack, Google and Stripe keys and private key blocks; `.github/workflows/security.yml` runs gitleaks over the full history and the working tree, plus trivy for vulnerabilities and secrets, on every push and weekly.
 - **Cloud routines (templates)** — email ingest, Gmail ingest, tech-intel scanner, weekly digest, lint + calendar enrichment, knowledge radar, pre-meeting brief, inbox triage, weekly reflect.
 - **Deploy templates** — `deploy/wiki-agent/` (cron: email export, health checks, briefings), `deploy/wiki-mcp/` (MCP over HTTPS with a Bearer token, landing page), `deploy/wiki-inbox/` (Telegram capture bot).
@@ -148,6 +149,8 @@ Frontmatter is parsed with libyaml, the lowercase fields every query needs are c
 python scripts/wiki-lint.py            # dead links, orphans, duplicate slugs/aliases
 python scripts/wiki-freshness.py       # frontmatter, stale pages per type, undated values, missing sources
 python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search
+python scripts/answer-eval.py          # groundedness and abstention of the whole tool chain
+python scripts/selftest.py             # 21 invariants of the MCP tool surface (seconds, no network)
 python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub
 python scripts/regen-index.py          # _index.md + hub pages
 ```
@@ -178,6 +181,8 @@ A second brain reads your mail, your invoices and your servers, so the interesti
 1. **The schema forbids it.** Passwords, API keys and invoice amounts never go in a page. Pages point at the password manager instead.
 2. **The pre-commit hook blocks it.** `git config core.hooksPath .githooks` once, and staged changes containing a Resend, GitHub, OpenAI, AWS, Slack, Google or Stripe key, or a private key block, are refused before they reach a commit.
 3. **CI catches what slipped through.** gitleaks scans the full history and the working tree, trivy scans dependencies and files; both fail the build.
+
+A separate `quality` workflow runs `selftest.py` on every push. It builds the index and asserts that exactly the fourteen tools and four prompts are registered, that `ctx` never leaks into `wiki_create`'s public schema, and that the write guards still refuse secrets, uncited answers and unknown sources. The content checks skip themselves in an empty vault, so the template and a real vault run the same test.
 
 The remote MCP server matches its Bearer token in constant time, exposes only `{"ok":true}` on the unauthenticated health endpoint, and passes its git credentials through a helper that reads the environment at call time, so no token is ever written into `.git/config` inside the container.
 
