@@ -9,3 +9,9 @@ paths = [
   '''^_intel/''',
   '''^_digest/''',
 ]
+
+[[allowlists]]
+description = "b1c0bc7 introduced selftest.py with its write-guard decoy written as a single literal. The decoy was never a real key; the next commit assembles the string at runtime so it no longer matches. The history scan still sees the old blob, so allowlist that one commit rather than rewrite public history."
+commits = [
+  "b1c0bc7b8a1aa74552851b4ade86d683e546844b",
+]
