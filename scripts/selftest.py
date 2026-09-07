@@ -38,6 +38,10 @@ EXPECTED_PROMPTS = {"daily_brief", "before_meeting", "what_did_i_promise", "inge
 
 MIN_PAGES = 100          # under dette regnes vaulten som tom (skabelon)
 
+# Attrappen til skrive-værnet samles ved kørsel. Skrives den som ét literal,
+# fanger gitleaks testens egen falske nøgle og gør CI rød af den forkerte grund.
+FAKE_SECRET = "api_key" + ": " + "abcdefgh" + "12345678"
+
 failures: list[str] = []
 checks = 0
 skipped = 0
@@ -131,7 +135,7 @@ def main() -> int:
 
         print("\nSkrive-værn")
         check("wiki_append afviser hemmeligheder",
-              lambda: "error" in srv.wiki_append(slug, "api_key: abcdefgh12345678"))
+              lambda: "error" in srv.wiki_append(slug, FAKE_SECRET))
         check("wiki_get afviser ugyldig as_of", lambda: "error" in srv.wiki_get(slug, as_of="i går"))
 
     tail = f" ({skipped} sprunget over)" if skipped else ""

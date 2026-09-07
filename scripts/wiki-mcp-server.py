@@ -325,10 +325,10 @@ def _emb_refresh() -> None:
     """Inkrementel: kun sider med ændret hash re-embeddes. Indeks i _index/embeddings.sqlite (gitignored).
     Kører under _EMB_LOCK; kald den fra en baggrundstråd (start + efter pull), aldrig inde i et request."""
     global _EMB_MAT, _EMB_KEYS, _EMB_DIRTY, _EMB_BUILDING
-    import numpy as np
     model = _emb_model()
     if model is None:
         return
+    import numpy as np   # se _semantic: numpy kraeves kun naar embeddings er slaaet til
     if not _EMB_LOCK.acquire(blocking=False):
         return  # en anden tråd bygger allerede
     _EMB_BUILDING = True
@@ -380,10 +380,10 @@ def _emb_refresh_locked(model, np) -> None:
 
 def _semantic(query: str, limit: int = 40) -> list[tuple[str, float]]:
     """[(slug, cosine)] rangeret — bedste chunk pr. side."""
-    import numpy as np
     model = _emb_model()
     if model is None:
         return []
+    import numpy as np   # importeres foerst her: uden embeddings er numpy ikke en afhaengighed
     snap = _EMB_SNAPSHOT      # ét konsistent (mat, keys)-par; de to maa ikke laeses hver for sig
     if snap is None:
         # Første opbygning tager et par minutter for 900 sider — kør den i baggrunden
