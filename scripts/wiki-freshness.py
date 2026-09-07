@@ -121,9 +121,12 @@ def check_all():
                 continue
             if MUTABLE_RE.search(s) and not DATED_RE.search(s):
                 freshness.append((rel, i, s[:110]))
-        # provenance
+        # provenance. Genererede sider (hubs) har ingen kilder at have, og svar-sider
+        # baerer deres kilder i `cites:` i stedet (issue #51).
         src = fm.get("sources")
-        if (src in (None, [], "") ) and not SOURCE_MARK_RE.search(body):
+        generated = bool(fm.get("generated"))
+        is_answer = str(fm.get("type", "")) == "answer" and fm.get("cites")
+        if (src in (None, [], "")) and not SOURCE_MARK_RE.search(body)                 and not generated and not is_answer:
             provenance.append(rel)
     return issues, stale, freshness, provenance
 
