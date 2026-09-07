@@ -673,13 +673,44 @@ def wiki_outline(slug: str) -> dict:
     return {**p.head(), "sources": p.fm.get("sources") or [], "sections": secs}
 
 
-def wiki_get(slug: str, section: str = "", max_chars: int = 12000) -> dict:
+HISTORY_RE = re.compile(r"^>\s*\[!info\]\s*Historik:\s*(.+)$", re.M)
+# Noeglen kan indeholde kolon og skraastreg (fx "beloeb:timepris/time"), saa den
+# laeses som alt op til det foerste anfoerselstegn.
+HISTORY_ITEM_RE = re.compile(
+    r"([^\";]+?)\s+\"([^\"]*)\"\s+gyldig indtil (\d{4}-\d{2}-\d{2}), derefter \"([^\"]*)\"", re.I)
+
+
+def _history(body: str) -> list[dict]:
+    """Historik-callouts som [{noegle, gammel vaerdi, gyldig indtil, ny vaerdi}] (issue #47)."""
+    out = []
+    for m in HISTORY_RE.finditer(body):
+        for key, old_v, until, new_v in HISTORY_ITEM_RE.findall(m.group(1)):
+            out.append({"key": key.strip().lower(), "old": old_v, "until": until, "new": new_v})
+    return out
+
+
+def wiki_get(slug: str, section: str = "", max_chars: int = 12000, as_of: str = "") -> dict:
     """Hent en side (eller kun én ##-sektion via `section`) ud fra slug, entitetsnavn eller alias.
-    Citér som `path#heading` når du bruger indholdet."""
+    Citér som `path#heading` når du bruger indholdet.
+
+    `as_of=YYYY-MM-DD` svarer i stedet på hvad der gjaldt på den dato: for de syv nøgler
+    modsigelses-tjekket kender (e-mail, telefon, beløb, version, kontaktperson, hosting)
+    udledes de tidligere værdier af historik-callouts på siden."""
     p = _resolve(slug)
     if not p:
         hits = wiki_search(slug, limit=5)
         return {"error": f"Ingen side '{slug}'", "suggestions": [h["slug"] for h in hits]}
+    if as_of:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", as_of):
+            return {"error": "as_of skal være YYYY-MM-DD"}
+        changed = [h for h in _history(p.body) if h["until"] > as_of]
+        d = p.head()
+        d["as_of"] = as_of
+        d["values_then"] = [{"key": h["key"], "value_then": h["old"],
+                             "changed_on": h["until"], "value_now": h["new"]} for h in changed]
+        d["note"] = ("Kun værdier der er ændret siden datoen. Tom liste betyder at de nuværende "
+                     "værdier også gjaldt dengang, så vidt historikken rækker.")
+        return d
     body = p.body
     if section:
         want = section.strip().lstrip("#").strip().lower()
@@ -784,6 +815,11 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     if contradictions:
         lines = "; ".join(f"{c['key']}: ny kilde siger \"{c['new']}\", siden sagde \"{c['old']}\"" for c in contradictions)
         block += f"\n\n> [!warning] Modsigelse ({today}): {lines}"
+        # Bi-temporalt: den gamle vaerdi slettes aldrig, men faar en gyldighedsperiode,
+        # saa "hvad var prisen i juli" stadig kan besvares (issue #47).
+        hist = "; ".join(f"{c['key']} \"{c['old']}\" gyldig indtil {today}, derefter \"{c['new']}\""
+                         for c in contradictions)
+        block += f"\n> [!info] Historik: {hist}"
         rq = WIKI / "_review-queue.md"
         rq_text = rq.read_text(encoding="utf-8") if rq.exists() else "# Review-kø\n"
         if "## Modsigelser" not in rq_text:
