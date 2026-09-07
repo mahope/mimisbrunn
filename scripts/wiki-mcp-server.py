@@ -169,8 +169,44 @@ def _fts_rebuild() -> None:
     con.executemany("INSERT INTO fts VALUES (?,?,?,?,?,?)", [
         (p.slug, p.entity, " ".join(str(a) for a in (p.fm.get("aliases") or [])), str(p.fm.get("description", "")),
          " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body) for p in _INDEX.values() if not p.is_redirect])
+    # Sektionsniveau: en kort sektion i en meget lang side taber ellers altid paa
+    # BM25's laengdenormalisering, selv om det er praecis der svaret staar.
+    con.execute("CREATE VIRTUAL TABLE fts_sec USING fts5(slug UNINDEXED, heading, body, "
+                "tokenize='unicode61 remove_diacritics 0')")
+    rows = []
+    for p in _INDEX.values():
+        if p.is_redirect or p.is_generated:
+            continue
+        for head, text in _sections(p.body):
+            if len(text.strip()) > 30:
+                rows.append((p.slug, f"{p.entity} {head}", text))
+    con.executemany("INSERT INTO fts_sec VALUES (?,?,?)", rows)
     con.commit()
     _FTS, _FTS_DIRTY = con, False
+
+
+def _bm25_sections(terms: list[str], limit: int = 40) -> list[tuple[str, str]]:
+    """[(slug, overskrift)] rangeret paa sektionsniveau, bedste sektion pr. side beholdes."""
+    q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
+    out: list[tuple[str, str]] = []
+    seen = set()
+    with _FTS_LOCK:
+        if _FTS is None or _FTS_DIRTY:
+            _fts_rebuild()
+        try:
+            rows = _FTS.execute(
+                "SELECT slug, heading FROM fts_sec WHERE fts_sec MATCH ? "
+                "ORDER BY bm25(fts_sec, 0, 3.0, 1.0) LIMIT ?", (q, limit * 3)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+    for slug, heading in rows:
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append((slug, heading))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _bm25(terms: list[str], limit: int = 50) -> list[str]:
@@ -485,7 +521,7 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     """Søg i wikien. Returnerer kompakte hits (slug, type, entity, description, last_updated, path, score, snippet,
     stale) — hent detaljer med wiki_outline/wiki_get. `type` afgrænser til person|project|client|tool|place|concept|recipe.
     Ranking: BM25 (SQLite FTS5) + feltvægtet term-match fusioneret med Reciprocal Rank Fusion; forældede sider nedvægtes.
-    `mode` = rrf (default, tre lanes inkl. semantisk hvis embeddings findes) | bm25 | weighted | semantic (til evaluering)."""
+    `mode` = rrf (default, fire lanes: feltvaegtet match, BM25 pr. side, BM25 pr. sektion og semantisk) | bm25 | weighted | sections | semantic (til evaluering). Hits faar `section` = den bedste overskrift, saa naeste kald kan vaere wiki_get(slug, section=...)."""
     _refresh()
     raw_terms = [t for t in re.split(r"\s+", query.lower().strip()) if t]
     # Stopord/korte ord (i, og, på, af, en …) drukner signalet i term-match — behold dem kun hvis intet andet er tilbage.
@@ -517,6 +553,11 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     weighted.sort(key=lambda x: (-x[0], x[1].slug))
     w_rank = {p.slug: i for i, (_, p) in enumerate(weighted)}
     b_rank = {sl: i for i, sl in enumerate(sl for sl in _bm25(terms, 60) if sl in _INDEX and allowed(_INDEX[sl]))}
+    # Fjerde lane: BM25 pr. sektion. Et fakta dybt i en lang side taber ellers altid paa
+    # laengdenormaliseringen, selv om sektionen omkring det er kort og praecis.
+    sec_hits = [(sl, hd) for sl, hd in _bm25_sections(terms, 40) if sl in _INDEX and allowed(_INDEX[sl])]
+    sec_rank = {sl: i for i, (sl, _) in enumerate(sec_hits)}
+    best_section = {sl: hd for sl, hd in sec_hits}
 
     s_rank: dict[str, int] = {}
     if mode in ("rrf", "semantic"):
@@ -526,12 +567,14 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
         fused = {sl: 1.0 / (60 + r) for sl, r in w_rank.items()}
     elif mode == "bm25":
         fused = {sl: 1.0 / (60 + r) for sl, r in b_rank.items()}
+    elif mode == "sections":
+        fused = {sl: 1.0 / (60 + r) for sl, r in sec_rank.items()}
     elif mode == "semantic":
         fused = {sl: 1.0 / (60 + r) for sl, r in s_rank.items()}
     else:
         # RRF k=60; den semantiske lane vægtes 0,6 — den er stærk på omskrivninger men svag på egennavne.
         fused = {}
-        for lane, weight in ((w_rank, 1.0), (b_rank, 1.0), (s_rank, 0.6)):
+        for lane, weight in ((w_rank, 1.0), (b_rank, 1.0), (sec_rank, 0.3), (s_rank, 0.6)):
             for sl, r in lane.items():
                 fused[sl] = fused.get(sl, 0.0) + weight / (60 + r)
     scored = []
@@ -544,6 +587,10 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     out = []
     for sc, p in scored[: max(1, min(limit, 30))]:
         d = p.head(); d["score"] = round(sc * 1000, 2); d["snippet"] = _snippet(p.body, terms, 160)
+        hd = best_section.get(p.slug)
+        if hd:
+            # overskriften er gemt som "<entity> <overskrift>" i indekset
+            d["section"] = hd[len(p.entity):].strip() if hd.startswith(p.entity) else hd
         out.append(d)
     return out
 
@@ -1101,6 +1148,92 @@ def wiki_brief(limit_per_group: int = 5) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- typede relationer (issue #45)
+# 900 sider har kun utypede [[links]], saa "hvem hoster hvad" er en soegning og ikke et opslag.
+# Konvention, én linje under "## Relationer":
+#   - hoster-hos:: [[hetzner]] — hovedserveren
+# Lukket vokabular, saa grafen ikke bliver en synonymsuppe. Utypede linjer virker uaendret.
+PREDICATES = {
+    "ejer": "ejer eller driver",
+    "kontakt-for": "er kontaktperson for",
+    "arbejder-hos": "er ansat eller tilknyttet",
+    "kunde-hos": "er kunde hos",
+    "leverandoer-til": "leverer til",
+    "hoster-hos": "hostes hos",
+    "bruger": "bruger dette vaerktoej eller denne teknologi",
+    "del-af": "er en del af",
+    "erstattet-af": "er afloest af",
+    "henvist-af": "kom ind via",
+}
+REL_RE = re.compile(r"^\s*-\s*([a-zaeoeaa\-]{3,20})::\s*(.+?)\s*$", re.I)
+
+
+def _typed_relations(p: "Page") -> list[dict]:
+    """[(praedikat, maal-slug, note)] fra sidens "## Relationer"-sektion."""
+    out = []
+    for head, text in _sections(p.body):
+        if head.strip().lower() != "relationer":
+            continue
+        for line in text.split("\n"):
+            m = REL_RE.match(line)
+            if not m:
+                continue
+            pred = m.group(1).lower()
+            if pred not in PREDICATES:
+                continue
+            rest = m.group(2)
+            link = _WIKILINK_RE.search(rest)
+            if not link:
+                continue
+            note = rest.split("—", 1)[1].strip() if "—" in rest else ""
+            out.append({"predicate": pred, "target": link.group(1).strip().lower(), "note": note[:160]})
+    return out
+
+
+def wiki_graph(slug: str = "", predicates: list[str] | None = None, depth: int = 1,
+               limit: int = 60) -> dict:
+    """Typede relationer som en graf. Uden `slug` returneres alle kanter af de oenskede typer,
+    saa man kan spoerge "hvem hoster hvad" i ét kald. Med `slug` foelges kanterne ud fra den side,
+    `depth` niveauer (maks 3), i begge retninger.
+
+    Gyldige praedikater: ejer, kontakt-for, arbejder-hos, kunde-hos, leverandoer-til, hoster-hos,
+    bruger, del-af, erstattet-af, henvist-af. Se `## Relationer` i _schema.md for formatet."""
+    _refresh()
+    wanted = {str(p).lower() for p in (predicates or [])} & set(PREDICATES)
+    edges = []
+    for p in _INDEX.values():
+        if p.is_redirect or p.is_generated:
+            continue
+        for rel in _typed_relations(p):
+            if wanted and rel["predicate"] not in wanted:
+                continue
+            edges.append({"from": p.slug, "predicate": rel["predicate"],
+                          "to": rel["target"], "note": rel["note"]})
+    if not slug:
+        return {"edges": edges[:limit], "count": len(edges),
+                "predicates": sorted({e["predicate"] for e in edges})}
+
+    start = _resolve(slug)
+    if not start:
+        return {"error": f"Ingen side '{slug}' — tjek stavning via wiki_search"}
+    seen = {start.slug}
+    frontier = {start.slug}
+    picked = []
+    for _ in range(max(1, min(depth, 3))):
+        nxt = set()
+        for e in edges:
+            if e["from"] in frontier and e["to"] not in seen:
+                picked.append(e); nxt.add(e["to"])
+            elif e["to"] in frontier and e["from"] not in seen:
+                picked.append({**e, "direction": "ind"}); nxt.add(e["from"])
+        seen |= nxt
+        frontier = nxt
+        if not frontier:
+            break
+    return {"slug": start.slug, "edges": picked[:limit], "count": len(picked),
+            "nodes": sorted(seen)}
+
+
 # --------------------------------------------------------------------------- prompts (issue #41)
 # Skills under /wiki-* findes kun på Mads' Windows-maskine. Prompts her virker mod
 # den samme server fra Claude Code, Claude-appen på telefonen og claude.ai.
@@ -1178,6 +1311,7 @@ for _fn, _ann in (
     (wiki_commitments, RO),
     (wiki_commit_add, RW),
     (wiki_brief, RO),
+    (wiki_graph, RO),
 ):
     mcp.tool(annotations=_ann)(_threaded(_fn))
 
