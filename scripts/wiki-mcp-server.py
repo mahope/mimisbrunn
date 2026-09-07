@@ -1065,50 +1065,59 @@ def _script_sha(path: Path) -> str:
 
 def _pull_loop(interval: int) -> None:
     """Pull main periodisk. Hvis selve server-scriptet ændrer sig (ny version pushet), genstart processen,
-    så deploy = git push uden redeploy af containeren."""
+    så deploy = git push uden redeploy af containeren.
+
+    Hele kroppen er pakket ind: en enkelt uventet fejl må ikke kunne dræbe tråden.
+    Sker det, står serveren og svarer på gamle data uden at nogen opdager det."""
     me = Path(__file__).resolve()
     my_sha = _script_sha(me)
+    ticks = 0
     while True:
         time.sleep(interval)
-        # LOCK holdes bevidst ikke over git-kald: et langsomt git ville ellers blokere
-        # baade /health og alle soegninger og give 502 gennem Cloudflares 100 s-loft (issue #24).
-        # Kun sporede aendringer taeller — untracked filer (indekser, midlertidige
-        # rapporter) maa ikke stoppe pull for evigt (issue #18).
-        dirty = _git("status", "--short", "--untracked-files=no", timeout=20).stdout.strip()
-        if dirty:
-            print(f"wiki-mcp: springer pull over, {len(dirty.splitlines())} sporede filer er ændret",
-                  file=sys.stderr, flush=True)
-            continue
-        r = _git("pull", "--rebase", "-q", "origin", "main", timeout=60)
-        if r.returncode != 0:
-            _git("rebase", "--abort", timeout=20)
-            print(f"wiki-mcp: pull fejlede ({r.returncode}): {r.stderr.strip()[:200]}", file=sys.stderr, flush=True)
-            continue
-        _refresh()
-        if not _EMB_DISABLED:
-            _emb_refresh()
-        new_sha = _script_sha(me)
-        if new_sha != my_sha:
-            # SHA i stedet for mtime: en checkout af identisk indhold maa ikke genstarte.
-            # py_compile foerst, ellers giver et push med syntaksfejl en crashloop (issue #22).
-            probe = subprocess.run([sys.executable, "-m", "py_compile", str(me)],
-                                   capture_output=True, text=True, timeout=60)
-            if probe.returncode != 0:
-                print(f"wiki-mcp: ny version kompilerer ikke — beholder den koerende: "
-                      f"{probe.stderr.strip()[:300]}", file=sys.stderr, flush=True)
-                my_sha = new_sha  # log kun én gang pr. brudt version
+        ticks += 1
+        try:
+            # LOCK holdes bevidst ikke over git-kald: et langsomt git ville ellers blokere
+            # baade /health og alle soegninger og give 502 gennem Cloudflares 100 s-loft (issue #24).
+            dirty = _git("status", "--short", "--untracked-files=no", timeout=20).stdout.strip()
+            if dirty:
+                print(f"wiki-mcp: springer pull over, {len(dirty.splitlines())} sporede filer er ændret",
+                      file=sys.stderr, flush=True)
                 continue
-            print("wiki-mcp: server-scriptet er opdateret via git — genstarter", file=sys.stderr, flush=True)
-            # Lad aktive streams lukke foerst; ellers ser klienten en afbrudt forbindelse.
-            srv = _UVICORN_SERVER
-            if srv is not None:
-                srv.should_exit = True
-                for _ in range(50):
-                    if getattr(srv, "started", False) is False:
-                        break
-                    time.sleep(0.1)
-            os.execv(sys.executable, [sys.executable, *sys.argv])
-
+            r = _git("pull", "--rebase", "-q", "origin", "main", timeout=60)
+            if r.returncode != 0:
+                _git("rebase", "--abort", timeout=20)
+                print(f"wiki-mcp: pull fejlede ({r.returncode}): {r.stderr.strip()[:200]}",
+                      file=sys.stderr, flush=True)
+                continue
+            _refresh()
+            if not _EMB_DISABLED:
+                _emb_refresh()
+            if ticks % 12 == 0:      # ca. hver time ved 5-minutters interval
+                head = _git("log", "-1", "--format=%h %s", timeout=20).stdout.strip()[:80]
+                print(f"wiki-mcp: pull-loop kører, HEAD {head}", file=sys.stderr, flush=True)
+            new_sha = _script_sha(me)
+            if new_sha != my_sha:
+                # SHA i stedet for mtime, og py_compile foerst: et push med syntaksfejl
+                # maa ikke give en crashloop (issue #22).
+                probe = subprocess.run([sys.executable, "-m", "py_compile", str(me)],
+                                       capture_output=True, text=True, timeout=60)
+                if probe.returncode != 0:
+                    print(f"wiki-mcp: ny version kompilerer ikke — beholder den kørende: "
+                          f"{probe.stderr.strip()[:300]}", file=sys.stderr, flush=True)
+                    my_sha = new_sha
+                    continue
+                print("wiki-mcp: server-scriptet er opdateret via git — genstarter", file=sys.stderr, flush=True)
+                srv = _UVICORN_SERVER
+                if srv is not None:
+                    srv.should_exit = True
+                    for _ in range(50):
+                        if getattr(srv, "started", False) is False:
+                            break
+                        time.sleep(0.1)
+                os.execv(sys.executable, [sys.executable, *sys.argv])
+        except Exception as e:      # traaden skal overleve alt andet end en genstart
+            print(f"wiki-mcp: pull-loop fejlede ({e.__class__.__name__}: {str(e)[:200]}) — prøver igen",
+                  file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------------------- aftaler (issue #38)
