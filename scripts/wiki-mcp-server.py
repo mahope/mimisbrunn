@@ -41,8 +41,9 @@ try:  # libyaml er ~8x hurtigere: 435 ms -> 55 ms for 900 sider (issue #19)
     from yaml import CSafeLoader as _YamlLoader
 except ImportError:  # pragma: no cover
     from yaml import SafeLoader as _YamlLoader
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import BaseModel, Field
 
 def _threaded(fn):
     """Kør et synkront tool paa anyio's traadpool.
@@ -631,6 +632,10 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
         p = _INDEX[sl]
         if _is_stale(p):
             sc *= 0.7
+        # Et arkiveret svar er afledt viden. Det skal kunne findes, men ikke fortraenge
+        # den entitet det handler om (issue #43).
+        if str(p.fm.get("type", "")) == "answer":
+            sc *= 0.6
         scored.append((sc, p))
     scored.sort(key=lambda x: (-x[0], x[1].slug))
     out = []
@@ -842,6 +847,47 @@ def wiki_append(slug: str, text: str, section: str = "", source: str = "") -> di
     git = _commit(paths, f"wiki: append {p.slug}")
     _refresh(force=True)
     return {"ok": True, "slug": p.slug, "git": git, "contradictions": contradictions}
+
+
+# --------------------------------------------------------------------------- elicitation (issue #44)
+# Naar wiki_create er i tvivl om en dublet, er det bedre at spoerge end at gaette.
+# Claude Code kan svare paa et elicitation-kald; claude.ai-connectoren kan formentlig
+# ikke, og et kald der bare haenger er vaerre end intet. Derfor: spoerg kun naar
+# klienten annoncerer stoette, og degradér ellers til at returnere kandidaterne.
+
+
+class _DupeChoice(BaseModel):
+    """Svar paa 'er det her en dublet?'"""
+    opret_alligevel: bool = Field(
+        default=False,
+        description="Ja = de er forskellige entiteter, opret den nye side. Nej = skriv til den eksisterende.")
+
+
+def _can_elicit(ctx) -> bool:
+    """Annoncerer klienten stoette for elicitation?"""
+    if ctx is None:
+        return False
+    try:
+        caps = ctx.session.client_params.capabilities        # type: ignore[attr-defined]
+        return getattr(caps, "elicitation", None) is not None
+    except Exception:
+        return False
+
+
+async def _ask_about_duplicate(ctx, entity: str, best: dict) -> bool | None:
+    """True/False fra brugeren, eller None hvis der ikke kunne spoerges."""
+    if not _can_elicit(ctx):
+        return None
+    try:
+        res = await ctx.elicit(
+            message=(f"'{entity}' ligner den eksisterende side '{best['slug']}' "
+                     f"({best['why']}, score {best['score']}). Er det en anden entitet?"),
+            schema=_DupeChoice)
+        if getattr(res, "action", "") == "accept" and res.data is not None:
+            return bool(res.data.opret_alligevel)
+        return False
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- entity resolution (issue #42)
@@ -1441,6 +1487,37 @@ def _p_ingest(tekst: str) -> str:
     )
 
 
+async def _wiki_create_with_ask(ctx: Context, type: str, slug: str, entity: str, description: str,
+                                body: str, tags: list[str] | None = None, aliases: list[str] | None = None,
+                                source: str = "", confidence: str = "medium", resource: str = "",
+                                force: bool = False) -> dict:
+    """Opret en ny wiki-side. `type` ∈ person|project|client|tool|place|concept|recipe. `slug` = kebab-case
+    filnavn uden .md. `description` = én sætning (≤180 tegn) om hvad entiteten ER. `body` = markdown der
+    starter med '# Titel'.
+
+    Ligner en eksisterende side for meget, spørges du — kan klienten ikke svare, returneres
+    kandidaterne i stedet, og du vælger selv wiki_append eller force=True."""
+    call = functools.partial(wiki_create, type, slug, entity, description, body, tags, aliases,
+                             source, confidence, resource, force)
+    res = await anyio.to_thread.run_sync(call)
+    if not (isinstance(res, dict) and res.get("candidates")) or force:
+        return res
+    answer = await _ask_about_duplicate(ctx, entity, res["candidates"][0])
+    if answer is True:
+        again = functools.partial(wiki_create, type, slug, entity, description, body, tags, aliases,
+                                  source, confidence, resource, True)
+        out = await anyio.to_thread.run_sync(again)
+        if isinstance(out, dict):
+            out["elicited"] = "brugeren bekræftede at det er en anden entitet"
+        return out
+    if answer is False:
+        res["elicited"] = "brugeren bekræftede at det er den samme entitet — brug wiki_append"
+    else:
+        res["note"] = ("Klienten understøtter ikke elicitation, så der blev ikke spurgt. "
+                       "Vælg selv: wiki_append på kandidaten, eller force=True hvis det er en anden entitet.")
+    return res
+
+
 # --------------------------------------------------------------------------- tool-registrering
 # Wrappers registreres til sidst, saa modulet stadig eksponerer de synkrone
 # funktioner under deres egne navne (issue #23).
@@ -1453,7 +1530,6 @@ for _fn, _ann in (
     (wiki_handover, RO),
     (wiki_stats, RO),
     (wiki_append, RW),
-    (wiki_create, RW),
     (wiki_commitments, RO),
     (wiki_commit_add, RW),
     (wiki_brief, RO),
@@ -1461,6 +1537,11 @@ for _fn, _ann in (
     (wiki_answer, RW),
 ):
     mcp.tool(annotations=_ann)(_threaded(_fn))
+
+# wiki_create registreres som async under sit eget navn: den skal kunne spoerge
+# brugeren ved dublet-tvivl, og det kraever request-konteksten (issue #44).
+_wiki_create_with_ask.__name__ = "wiki_create"
+mcp.tool(annotations=RW)(_wiki_create_with_ask)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
