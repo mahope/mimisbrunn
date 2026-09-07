@@ -54,15 +54,27 @@ def candidates(cwd: Path):
     names = []
     for part in reversed(cwd.parts):
         p = part.lower()
-        if p and p not in GENERIC and not re.match(r"^[a-z]:\\?$", p):
+        # Mindst tre tegn og mindst ét bogstav: ellers slipper drevbogstaver ("c"),
+        # separatorer og tal ind som søgenavne og matcher på kryds og tværs.
+        if (len(p) >= 3 and any(ch.isalpha() for ch in p) and p not in GENERIC
+                and not re.match(r"^[a-z]:[\\/]?$", p)):
             names.append(p)
         if len(names) >= 3:      # var 2; kundenavnet ligger tit et niveau hoejere (issue #34)
             break
     try:
-        r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=cwd, capture_output=True, text=True, timeout=5)
-        if r.returncode == 0 and r.stdout.strip():
-            repo = re.sub(r"\.git$", "", r.stdout.strip().split("/")[-1].split(":")[-1]).lower()
-            names.insert(0, repo)
+        # Kun hvis mappen selv er repoets rod. Ligger den inde i et faelles parent-repo
+        # (fx C:/Projects), ville parentens navn ellers blive soegenavn nummer ét for
+        # hver eneste undermappe og matche paa kryds og tvaers (issue #34).
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                             capture_output=True, text=True, timeout=5)
+        same_root = (top.returncode == 0
+                     and Path(top.stdout.strip()).resolve() == Path(cwd).resolve())
+        if same_root:
+            r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=cwd,
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                repo = re.sub(r"\.git$", "", r.stdout.strip().split("/")[-1].split(":")[-1]).lower()
+                names.insert(0, repo)
     except Exception:
         pass
     return list(dict.fromkeys(names))
@@ -180,7 +192,10 @@ def main():
         for i, n in enumerate(names):
             w = max(1, 3 - i)
             if resource and n in resource: score += 10 * w
+            joined = slug.replace("-", "")
             if slug == n or entity == n or n in aliases: score += 8 * w
+            # "kaareogemil" skal ramme siden "kaare-og-emil": mappenavne har sjaeldent bindestreger
+            elif len(n) > 5 and (joined == n.replace("-", "") or entity.replace(" ", "") == n): score += 7 * w
             elif slug.startswith(n) or n in slug: score += 3 * w
             elif n in tags: score += 3 * w
             elif re.search(rf"\b{re.escape(n)}\b", desc): score += 2 * w
