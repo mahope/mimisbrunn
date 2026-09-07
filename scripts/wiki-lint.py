@@ -89,7 +89,29 @@ for f in FILES:
             broken[t] += 1
             broken_src[t].add(os.path.relpath(f, ROOT))
 
-orphans = sorted(slug(f) for f in FILES if incoming[f] == 0 and f not in REDIRECTS)
+# Svar-sider i entities/answers/ er per definition uden indgaaende links: de arkiverer
+# et svar, ikke en entitet. De skal ikke staa som orphans (issue #43).
+orphans = sorted(slug(f) for f in FILES
+                 if incoming[f] == 0 and f not in REDIRECTS
+                 and os.sep + "answers" + os.sep not in f)
+
+# Citater paa svar-sider skal pege paa filer der stadig findes, ellers hviler svaret
+# paa en kilde der er vaek.
+dead_cites = []
+for f in FILES:
+    if os.sep + "answers" + os.sep not in f:
+        continue
+    try:
+        txt = open(f, encoding="utf-8-sig").read().replace("\r\n", "\n")
+    except Exception:
+        continue
+    m = re.search(r"^cites:\n((?:  - .+\n)+)", txt, re.M)
+    if not m:
+        continue
+    for line in m.group(1).strip().split("\n"):
+        ref = line.strip()[2:].strip().split("#")[0]
+        if ref and not os.path.exists(os.path.join(ROOT, ref)):
+            dead_cites.append((os.path.relpath(f, ROOT), ref))
 
 flag = sys.argv[1] if len(sys.argv) > 1 else "--all"
 print(f"# Wiki Lint — {len(FILES)} sider\n")
@@ -99,6 +121,12 @@ if flag in ("--all", "--broken", "--missing"):
     for t, c in broken.most_common(40):
         srcs = ", ".join(sorted(broken_src[t])[:2])
         print(f"  [{c}x] [[{t}]]   <- {srcs}")
+    print()
+
+if flag in ("--all", "--cites"):
+    print(f"## Døde citater på svar-sider: {len(dead_cites)}")
+    for src_file, ref in dead_cites[:20]:
+        print(f"  {src_file} -> {ref}")
     print()
 
 if flag in ("--all", "--orphans"):

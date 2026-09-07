@@ -74,7 +74,7 @@ RW = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=F
 WIKI = Path(os.environ.get("WIKI_ROOT") or Path(__file__).resolve().parent.parent)
 ENTITIES = WIKI / "entities"
 FOLDERS = {"person": "people", "project": "projects", "client": "clients", "tool": "tools",
-           "place": "places", "concept": "concepts", "recipe": "recipes"}
+           "place": "places", "concept": "concepts", "recipe": "recipes", "answer": "answers"}
 LOCK = threading.Lock()
 
 
@@ -1148,6 +1148,67 @@ def wiki_brief(limit_per_group: int = 5) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- svar-arkiv (issue #43)
+# Karpathys pointe: et svar der er slidt frem af flere opslag er selv viden. Uden et sted
+# at lægge det bliver det samme arbejde gjort forfra i naeste session.
+ANSWER_DIR = "answers"
+ANSWER_STALE_DAYS = 90
+CITE_RE = re.compile(r"^([\w\-./]+\.md)(?:#(.+))?$")
+
+
+def wiki_answer(question: str, answer: str, cites: list[str], stale_days: int = ANSWER_STALE_DAYS,
+                confidence: str = "medium") -> dict:
+    """Arkivér et svar som en side i entities/answers/ med de kilder det bygger paa.
+
+    `cites` er stier som `entities/clients/solaris.md#Drift` — samme form som wiki_get
+    returnerer i `path`. Mindst \u00e9n citation er paakraevet: et svar uden kilder er en
+    paastand. Siden faar `stale_after`, saa den selv melder sig naar den boer efterproeves,
+    og `wiki-lint.py` advarer hvis en kilde forsvinder."""
+    q = " ".join(str(question).split())
+    if len(q) < 8:
+        return {"error": "Spørgsmålet er for kort til at kunne genfindes"}
+    if not answer or len(answer.strip()) < 20:
+        return {"error": "Svaret er for kort til at være værd at arkivere"}
+    if not cites:
+        return {"error": "Mindst én citation er påkrævet — et svar uden kilder er en påstand"}
+
+    bad = []
+    clean = []
+    for c in cites:
+        c = str(c).strip().replace("\\", "/")
+        m = CITE_RE.match(c)
+        if not m or not (WIKI / m.group(1)).exists():
+            bad.append(c)
+        else:
+            clean.append(c)
+    if bad:
+        return {"error": f"Ukendte kilder: {', '.join(bad[:3])} — brug stien fra wiki_get"}
+
+    today = dt.date.today()
+    slug = re.sub(r"[^a-z0-9]+", "-", q.lower())[:60].strip("-")
+    slug = f"{today.isoformat()}-{slug}"
+    path = ENTITIES / ANSWER_DIR / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return {"error": f"'{slug}' er allerede arkiveret i dag — brug wiki_append hvis svaret er blevet bedre"}
+
+    stale = (today + dt.timedelta(days=max(7, stale_days))).isoformat()
+    desc = (q[:170] + "…") if len(q) > 170 else q
+    fm = ["---", f'entity: "{q[:120]}"', "type: answer", f'description: "Arkiveret svar: {desc}"',
+          f"aliases: []", "sources: []", f"confidence: {confidence if confidence in ('high','medium','low') else 'medium'}",
+          f"created: {today.isoformat()}", f"last_updated: {today.isoformat()}",
+          f"stale_after: {stale}", "tags: [svar, arkiv]",
+          "cites:"] + [f"  - {c}" for c in clean] + ["---"]
+    body = [f"# {q}", "", answer.strip(), "", "## Kilder", ""]
+    body += [f"- `{c}`" for c in clean]
+    body += ["", f"> Arkiveret {today.isoformat()}. Efterprøv senest {stale}: kilderne kan have ændret sig."]
+    path.write_text("\n".join(fm + [""] + body) + "\n", encoding="utf-8", newline="\n")
+    _refresh(force=True)
+    git = _commit([path], f"wiki: arkivér svar {slug}")
+    return {"ok": True, "slug": slug, "path": path.relative_to(WIKI).as_posix(),
+            "stale_after": stale, "cites": clean, "git": git}
+
+
 # --------------------------------------------------------------------------- typede relationer (issue #45)
 # 900 sider har kun utypede [[links]], saa "hvem hoster hvad" er en soegning og ikke et opslag.
 # Konvention, én linje under "## Relationer":
@@ -1312,6 +1373,7 @@ for _fn, _ann in (
     (wiki_commit_add, RW),
     (wiki_brief, RO),
     (wiki_graph, RO),
+    (wiki_answer, RW),
 ):
     mcp.tool(annotations=_ann)(_threaded(_fn))
 
