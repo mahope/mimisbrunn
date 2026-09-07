@@ -6,7 +6,7 @@ patterns=(
   'Resend API key|re_[A-Za-z0-9_]{30,}'
   'GitHub classic PAT|ghp_[A-Za-z0-9]{36}'
   'GitHub fine-grained PAT|github_pat_[A-Za-z0-9_]{80,}'
-  'OpenAI/Anthropic key|sk-[A-Za-z0-9_-]{20,}'
+  'OpenAI/Anthropic key|(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
   'AWS access key|AKIA[0-9A-Z]{16}'
   'Slack token|xox[baprs]-[A-Za-z0-9-]{10,}'
   'Google API key|AIza[0-9A-Za-z_-]{35}'

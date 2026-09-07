@@ -180,6 +180,7 @@ A second brain reads your mail, your invoices and your servers, so the interesti
 
 1. **The schema forbids it.** Passwords, API keys and invoice amounts never go in a page. Pages point at the password manager instead.
 2. **The pre-commit hook blocks it.** `git config core.hooksPath .githooks` once, and staged changes containing a Resend, GitHub, OpenAI, AWS, Slack, Google or Stripe key, or a private key block, are refused before they reach a commit.
+   The same `.githooks` directory holds a `pre-push` hook that runs `selftest.py` when the MCP server changed, so a broken tool surface never reaches the remote. If you already set a global `core.hooksPath`, it wins over the repository's own directory — give the global hook a two-line dispatcher that execs `$(git rev-parse --show-toplevel)/.githooks/pre-push` when that file exists, and repository hooks work again.
 3. **CI catches what slipped through.** gitleaks scans the full history and the working tree, trivy scans dependencies and files; both fail the build.
 
 A separate `quality` workflow runs `selftest.py` on every push. It builds the index and asserts that exactly the fourteen tools and four prompts are registered, that `ctx` never leaks into `wiki_create`'s public schema, and that the write guards still refuse secrets, uncited answers and unknown sources. The content checks skip themselves in an empty vault, so the template and a real vault run the same test.

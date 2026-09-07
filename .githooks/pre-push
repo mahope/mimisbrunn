@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run the selftest before pushing, but only when the MCP server or the test itself
+# changed. A patch that deletes functions should be stopped here, not discovered
+# in production.
+set -euo pipefail
+
+range_files() {
+  local base
+  base=$(git rev-parse --verify -q "@{upstream}" 2>/dev/null || echo "")
+  if [ -n "$base" ]; then
+    git diff --name-only "$base"...HEAD
+  else
+    git diff --name-only HEAD~1 2>/dev/null || true
+  fi
+}
+
+if range_files | grep -qE '^scripts/(wiki-mcp-server|selftest)\.py$'; then
+  echo "pre-push: running the selftest (the MCP server changed)"
+  if ! WIKI_EMBED=0 python scripts/selftest.py; then
+    echo ""
+    echo "BLOCKED: the selftest failed. Fix it, or push with --no-verify if you know why."
+    exit 1
+  fi
+fi
+exit 0
