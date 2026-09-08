@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Score all wiki entities 0-100% based on content quality indicators."""
-import re, yaml, json
+import re, sys, yaml, json
 from pathlib import Path
 from collections import defaultdict
 
@@ -233,13 +233,19 @@ for t in ["client", "person", "project", "tool", "concept", "place", "recipe"]:
 
 report.append("")
 
-(wiki / "_completeness-report.md").write_text("\n".join(report), encoding="utf-8")
+# Scriptet havde ingen argumenter og skrev ubetinget — ogsaa paa `--help`, som det
+# ignorerede. Det gjorde det umuligt at roegteste i CI uden at snavse arbejdstraeet til,
+# og et --help der stille regenererer to filer er en overraskelse ingen har brug for.
+tør = "--dry-run" in sys.argv
 
-# Also save raw JSON for other scripts
-(wiki / "_completeness-scores.json").write_text(
-    json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
-)
+if not tør:
+    (wiki / "_completeness-report.md").write_text("\n".join(report), encoding="utf-8")
+
+    # Also save raw JSON for other scripts
+    (wiki / "_completeness-scores.json").write_text(
+        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 print(f"Scored {len(results)} entities. Average: {avg_score:.0f}%")
 print(f"  Excellent: {len(excellent)}, Good: {len(good)}, Needs work: {len(needs_work)}, Stub: {len(stub)}")
-print(f"Report written to _completeness-report.md")
+print("Dry run — intet skrevet." if tør else "Report written to _completeness-report.md")
