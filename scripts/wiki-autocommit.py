@@ -89,6 +89,10 @@ def main() -> int:
     r = git("commit", "-q", "-m", f"wiki: opdatér {slug}")
     if r.returncode != 0:
         log(f"commit fejlede for {rel}: {r.stderr.strip()[:200]}")
+        # Ryd indekset igen. Uden dette bliver filerne liggende staged, og en hemmelighed
+        # som pre-commit-vagten lige har afvist, venter dermed paa at blive fejet med i
+        # naeste commit nogen laver — muligvis med --no-verify.
+        git("reset", "-q", "HEAD", "--", *[p for p in paths if (WIKI / p).exists()])
         return 0
 
     if os.environ.get("WIKI_AUTOPUSH") == "1":
