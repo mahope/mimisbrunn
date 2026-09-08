@@ -8,8 +8,8 @@ fandtes. Med dette script kan de soege og skrive praecist i stedet (issue #30).
 
 Brug:
   python scripts/wiki-cli.py search "en kunde hosting" [--type client] [--limit 5] [--json]
-  python scripts/wiki-cli.py outline solaris
-  python scripts/wiki-cli.py get solaris [--section "Aftaler"] [--max-chars 4000]
+  python scripts/wiki-cli.py outline en-kunde
+  python scripts/wiki-cli.py get en-kunde [--section "Aftaler"] [--max-chars 4000]
   python scripts/wiki-cli.py related solaris
   python scripts/wiki-cli.py recent [--days 7]
   python scripts/wiki-cli.py append solaris "- **6. september 2026:** ..." [--section Noter] [--source "samtale 2026-09-06"]

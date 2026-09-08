@@ -1,11 +1,13 @@
 ---
 title: Wiki Index
-description: Auto-generated table of contents
+description: Automatisk genereret indholdsfortegnelse
 ---
 
 # Wiki Index
 
-> Generated automatically from `entities/`. Run `python scripts/regen-index.py` to update.
+> Genereret automatisk fra `entities/`. Kør `python scripts/regen-index.py` for at opdatere.
+
+**Visninger i Obsidian:** [[clients.base|Kunder]] · [[stale.base|Forældede sider]] · [[commitments.base|Åbne aftaler]] · [[review.base|Til gennemgang]] (mappen `_bases/`).
 
 ## Clients (0)
 
@@ -21,7 +23,16 @@ description: Auto-generated table of contents
 
 ## Recipes (0)
 
+## Hubs (genereret)
+- [[hub-aktive-kunder|Aktive kunder]] (0)
+- [[hub-tidligere-kunder-og-leads|Tidligere kunder og tabte leads]] (0)
+- [[hub-aktive-projekter|Aktive projekter]] (0)
+- [[hub-wordpress-stack|WordPress-stack]] (0)
+- [[hub-ai-og-agenter|AI og agenter]] (0)
+- [[hub-forening|Foreningsliv]] (0)
+- [[hub-egne-produkter|Egne produkter og infrastruktur]] (0)
+
 ---
 
-**Total pages:** 0
-**Last updated:** (run /wiki-setup to initialize)
+**Antal sider:** 0
+**Sidst opdateret:** 2026-09-08 (auto-genereret)

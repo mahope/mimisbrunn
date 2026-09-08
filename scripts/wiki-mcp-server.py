@@ -995,7 +995,7 @@ async def _ask_about_duplicate(ctx, entity: str, best: dict) -> bool | None:
 
 
 # --------------------------------------------------------------------------- entity resolution (issue #42)
-# Auto-ingest koerer dagligt og ville ellers oprette "Anna Katrin", "anna-katrin-noergaard"
+# Auto-ingest koerer dagligt og ville ellers oprette "Anna Eksempel", "anna-eksempel-hansen"
 # og "En S Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
 # fremfor at en cosine-graense alene afgoer sagen.
 DUPLICATE_SCORE = 0.72      # over denne: afvis oprettelse medmindre force=True.
