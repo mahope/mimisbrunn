@@ -25,7 +25,7 @@ REDIRECT_RE = re.compile(r"^type:\s*redirect\s*$", re.M)
 REDIRECTS = {f for f in FILES if REDIRECT_RE.search(open(f, encoding="utf-8").read()[:600])}
 
 # Tabel-escapede pipes: gør "\|" til "|" FØR vi parser links, så
-# [[centic\|Centic]] læses som [[centic|Centic]] og target=centic.
+# [[en-kunde\|En Kunde]] læses som [[en-kunde|En Kunde]] og target=en-kunde.
 LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
 ALIAS_RE = re.compile(r'aliases:\s*\[([^\]]*)\]')
 ENTITY_RE = re.compile(r'entity:\s*"?([^"\n]+?)"?\s*$', re.M)

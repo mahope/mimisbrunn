@@ -43,7 +43,7 @@ try:
 except Exception:  # pragma: no cover
     pass
 
-# Leverandør- og dokumentationsdomæner er ikke Mads' påstande om egen drift.
+# Leverandør- og dokumentationsdomæner er ikke påstande om din egen drift.
 STØJ = ("wordpress.org", "github.com", "patchstack.com", "google.com", "hostinger.com",
         "dokploy.com", "anthropic.com", "claude.ai", "npmjs.com", "cloudflare.com",
         "downloads.w.org", "docs.", "developer.", "www.w3.org", "schema.org",

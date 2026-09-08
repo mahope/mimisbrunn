@@ -29,6 +29,8 @@ from pathlib import Path
 ROOT = Path(os.environ.get("WIKI_ROOT", Path(__file__).resolve().parent.parent))
 ENTITIES = ROOT / "entities"
 TODAY = dt.date.today()
+# Hvem aftalen er med. En skabelon skal ikke skrive en fremmeds navn ind i dine aftaler.
+EJER = os.environ.get("WIKI_OWNER", "<dit navn>")
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -108,7 +110,7 @@ def main() -> int:
         for h in valgt[: a.limit]:
             aftalt = h["dato"] or "<AFTALT>"
             hvad = re.sub(r"\s+", " ", h["tekst"]).strip()
-            print(f"- [ ] (aftalt {aftalt}, forfald <FORFALD>) Mads → [[{h['side']}]]: {hvad[:140]}")
+            print(f"- [ ] (aftalt {aftalt}, forfald <FORFALD>) {EJER} → [[{h['side']}]]: {hvad[:140]}")
             print(f"      # {h['sti']}:{h['linje']}"
                   + (f"  ({h['alder']} dage gammel)" if h["alder"] is not None else ""))
         return 0

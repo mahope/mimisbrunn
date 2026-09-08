@@ -12,7 +12,7 @@ Nøgler fra miljø:
 Brug:
   export OPENAI_API_KEY=sk-...
   export ANTHROPIC_API_KEY=sk-ant-...
-  python scripts/transcribe-meeting.py moede.m4a --client "Centic" --participants "Mads, Mohammad"
+  python scripts/transcribe-meeting.py moede.m4a --client "En Kunde" --participants "Anna, Bo"
 
 Output: _sources/meetings/YYYY-MM-DD-<klient>-moede.md  (referat + fuld transskription)
 Derefter:  /wiki-ingest _sources/meetings/<fil>
@@ -73,7 +73,7 @@ def transcribe_openai(path, model, language, prompt=None):
 
 
 def parse_speakers(spec: str) -> dict:
-    """"1=Mads,2=Lukas" -> {1: "Mads", 2: "Lukas"}.
+    """"1=Anna,2=Bo" -> {1: "Anna", 2: "Bo"}.
 
     Uden navne staar der "Taler 1" og "Taler 2" i transskriptet, og saa kan man ikke
     tilskrive en beslutning til nogen bagefter (issue #46)."""
@@ -213,7 +213,7 @@ def main():
     ap.add_argument("--speaker-a", default="Taler A", help="navn på venstre kanal (L)")
     ap.add_argument("--speaker-b", default="Taler B", help="navn på højre kanal (R)")
     ap.add_argument("--speakers", default="",
-                    help='navngiv talere fra ML-diarisering, fx "1=Mads,2=Lukas". '
+                    help='navngiv talere fra ML-diarisering, fx "1=Anna,2=Bo". '
                          'Uden dem staar der "Taler 1", og beslutninger kan ikke tilskrives nogen')
     ap.add_argument("--segments-model", default="whisper-1", help="model til tidsstemplede segmenter (kræver timestamps)")
     a = ap.parse_args()
