@@ -97,7 +97,11 @@ class Page:
     low_desc: str = ""
     low_tags: str = ""
     low_body: str = ""
-    haystack: str = ""
+    # Staleness afhaenger kun af frontmatter og dagens dato, men blev regnet ~500 gange
+    # pr. soegning. Cachen nulstilles af sig selv naar datoen skifter, og en aendret fil
+    # giver et nyt Page-objekt, saa den kan ikke blive forladt.
+    _stale: bool = False
+    _stale_on: object = None
 
     @property
     def entity(self) -> str:
@@ -150,6 +154,14 @@ def _to_date(v):
 
 def _is_stale(p: "Page") -> bool:
     """stale_after i frontmatter, ellers type-default; tool/concept forældes ikke."""
+    today = dt.date.today()
+    if p._stale_on == today:
+        return p._stale
+    p._stale, p._stale_on = _is_stale_uncached(p), today
+    return p._stale
+
+
+def _is_stale_uncached(p: "Page") -> bool:
     if str(p.fm.get("status", "")).lower() in ARCHIVED_STATUS:
         return False
     limit = _to_date(p.fm.get("stale_after"))
@@ -432,7 +444,7 @@ def _parse(path: Path) -> Page | None:
                 body=body, mtime=path.stat().st_mtime, links={l.strip().lower() for l in LINK_RE.findall(body)},
                 low_ent=low_ent, low_slug=low_slug, low_slug_joined=low_slug.replace("-", ""),
                 low_alias=low_alias, low_desc=low_desc, low_tags=low_tags, low_body=low_body,
-                haystack=" ".join((low_ent, low_alias, low_desc, low_body)))
+)
 
 
 def _refresh(force: bool = False) -> None:
@@ -589,14 +601,23 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
         if not allowed(p):
             continue
         score = 0.0
+        # `alle_termer` erstatter et tidligere `all(t in p.haystack ...)`. haystack var
+        # sammensat af netop entity, alias, description og body, og en term indeholder
+        # aldrig mellemrum, saa de fire booleans nedenfor giver samme svar — uden at
+        # scanne hele brødteksten en ekstra gang pr. term, og uden en 3,4 MB dublet.
+        alle_termer = True
         for t in terms:
-            if t in p.low_ent or t in p.low_slug or (len(t) > 6 and t in p.low_slug_joined): score += 10  # sammensatte ord: tilbudsskabelon ~ tilbuds-skabelon
-            if t in p.low_alias: score += 8
-            if t in p.low_desc: score += 4
+            e = t in p.low_ent
+            if e or t in p.low_slug or (len(t) > 6 and t in p.low_slug_joined): score += 10  # sammensatte ord: tilbudsskabelon ~ tilbuds-skabelon
+            a = t in p.low_alias
+            if a: score += 8
+            d = t in p.low_desc
+            if d: score += 4
             if t in p.low_tags: score += 3
             c = p.low_body.count(t)
             if c: score += min(c, 10) * 0.6
-        if all(t in p.haystack for t in terms):
+            if not (e or a or d or c): alle_termer = False
+        if alle_termer:
             score += 3
         if score > 0:
             weighted.append((score, p))
@@ -767,7 +788,9 @@ def wiki_handover() -> str:
 
 def wiki_stats() -> dict:
     """Antal sider pr. type, seneste ændringer og git-status for vaulten."""
-    _refresh(force=True)
+    # force=True genlaeste alle 907 filer ved hvert kald og kostede 335 ms p50.
+    # mtime-sweepet fanger enhver aendring alligevel, saa tallene bliver de samme.
+    _refresh()
     counts: dict[str, int] = {}
     for p in _INDEX.values():
         counts[p.folder] = counts.get(p.folder, 0) + 1

@@ -125,16 +125,22 @@ Every fact is *timeless*, *dated* (`(as of 2026-09, source)`) or a *pointer* to 
 
 Search quality is measured, not assumed: `python scripts/retrieval-eval.py --mode rrf` runs `scripts/eval/queries.yaml` and prints recall@5 and MRR. Add a query every time a real search misses.
 
-Speed is measured too. On a 900-page vault, single core:
+Speed is measured too, and by a script you can re-run rather than a number someone
+once typed: `python scripts/bench.py` reports p50/p95/max over the paths a model
+actually hits. On a 907-page vault, single core, embeddings off:
 
-| | |
-|---|---|
-| Full re-parse of every page | 181 ms |
-| `wiki_search`, term-match lane | 7.4 ms (p50) |
-| `wiki_search`, BM25 lane | 6.7 ms (p50) |
-| Incremental embedding update, one changed page | 30 ms |
+| | p50 | p95 |
+|---|---|---|
+| `wiki_search`, all four lanes fused | 12.4 ms | 22.8 ms |
+| `wiki_get` (72 kB page) | 0.01 ms | 0.02 ms |
+| `wiki_brief` | 11.8 ms | 16.0 ms |
+| `wiki_graph`, whole graph | 10.9 ms | 13.4 ms |
+| `wiki_stats` (includes two git calls) | 120 ms | 164 ms |
+| Full re-parse of every page | 257 ms | |
 
-Frontmatter is parsed with libyaml, the lowercase fields every query needs are computed once at load, and generated hub pages are kept out of both indexes so they never crowd out a real answer.
+Percentiles, not averages: a 12 ms median means nothing if the tail is a second.
+
+Frontmatter is parsed with libyaml, the lowercase fields every query needs are computed once at load, and generated hub pages are kept out of both indexes so they never crowd out a real answer. Staleness is cached per page per day rather than recomputed for every candidate, and the search deliberately holds no second copy of the body text: the one check that used a concatenated haystack now reuses booleans the scoring loop already computes, which halved both the search time and the index's string memory.
 
 ## Capture from anywhere
 
