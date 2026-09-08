@@ -7,7 +7,10 @@ from datetime import date, timedelta
 
 wiki = Path(__file__).resolve().parent.parent
 intel_dir = wiki / "_intel"
-sent_log = intel_dir / ".sent-briefings.json"
+# Uden punktum foran. Navnet med punktum er et levn fra en omdoebning: filen blev
+# synlig, saa den kan committes og dermed overleve en genstart af containeren.
+# Laeser scriptet den skjulte, finder det ingen historik og sender alt igen.
+sent_log = intel_dir / "sent-briefings.json"
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 # Saet dem i miljoeet. En skabelon skal ikke baere vedligeholderens egen adresse.
