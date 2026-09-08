@@ -280,30 +280,38 @@ def _bm25_sections(terms: list[str], limit: int = 40) -> list[tuple[str, str]]:
     return out
 
 
-def _best_section_for(slug: str, terms: list[str]) -> str | None:
-    """Bedste sektion paa én bestemt side. Sektionsbanen er en global top-N, saa en side der
-    vinder paa de andre baner kan ende uden sektion — og saa maa modellen gaette hvor i en
-    63.000 tegn lang side svaret staar. Her spoerges der maalrettet, kun for de faa sider
-    der faktisk returneres."""
+def _best_sections_for(slugs: list[str], terms: list[str]) -> dict[str, str]:
+    """Bedste sektion pr. side for en haandfuld bestemte sider, i ét opslag.
+
+    Sektionsbanen er en global top-N, saa en side der vinder paa de andre baner kan ende
+    uden sektion — og saa maa modellen gaette hvor i en 63.000 tegn lang side svaret staar.
+    Her spoerges der maalrettet, kun for de faa sider der faktisk returneres, og med én
+    forespoergsel i stedet for én pr. side (otte runde ture kostede ca. 6 ms p50).
+
+    Intro-sektionen er gemt med tom overskrift og springes over: den er ubrugelig som
+    pejlemaerke, for den staar allerede oeverst paa siden."""
     q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
-    if not q:
-        return None
+    if not q or not slugs:
+        return {}
+    huller = ",".join("?" * len(slugs))
     with _FTS_LOCK:
         if _FTS is None or _FTS_DIRTY:
             _fts_sync()
         try:
             rows = _FTS.execute(
-                "SELECT heading FROM fts_sec WHERE fts_sec MATCH ? AND slug = ? "
-                "ORDER BY bm25(fts_sec, 0, 3.0, 1.0) LIMIT 5", (q, slug)).fetchall()
+                f"SELECT slug, heading FROM fts_sec WHERE fts_sec MATCH ? AND slug IN ({huller}) "
+                "ORDER BY bm25(fts_sec, 0, 3.0, 1.0)", (q, *slugs)).fetchall()
         except sqlite3.OperationalError:
-            return None
-    # Intro-sektionen er gemt med tom overskrift og er ubrugelig som pejlemaerke:
-    # den staar allerede oeverst paa siden. Tag den foerste rigtige overskrift.
-    ent = (_INDEX[slug].entity if slug in _INDEX else "")
-    for (heading,) in rows:
-        if heading[len(ent):].strip() if heading.startswith(ent) else heading.strip():
-            return heading
-    return None
+            return {}
+    ud = {}
+    for slug, heading in rows:
+        if slug in ud:
+            continue
+        ent = _INDEX[slug].entity if slug in _INDEX else ""
+        vis = heading[len(ent):].strip() if heading.startswith(ent) else heading.strip()
+        if vis:
+            ud[slug] = heading
+    return ud
 
 
 def _bm25(terms: list[str], limit: int = 50) -> list[str]:
@@ -704,15 +712,22 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
             sc *= 0.6
         scored.append((sc, p))
     scored.sort(key=lambda x: (-x[0], x[1].slug))
-    out = []
-    for sc, p in scored[: max(1, min(limit, 30))]:
-        d = p.head(); d["score"] = round(sc * 1000, 2); d["snippet"] = _snippet(p.body, terms, 160)
+    top = scored[: max(1, min(limit, 30))]
+
+    def _sec(page: Page, hd: str | None) -> str:
         # overskriften er gemt som "<entity> <overskrift>" i indekset
-        def _sec(hd):
-            if not hd:
-                return ""
-            return hd[len(p.entity):].strip() if hd.startswith(p.entity) else hd.strip()
-        sec = _sec(best_section.get(p.slug)) or _sec(_best_section_for(p.slug, terms))
+        if not hd:
+            return ""
+        return hd[len(page.entity):].strip() if hd.startswith(page.entity) else hd.strip()
+
+    # En side kan godt staa i best_section og alligevel mangle et brugbart pejlemaerke:
+    # den globale bane kan have peget paa intro-sektionen, hvis overskrift er tom.
+    mangler = [pp.slug for _, pp in top if not _sec(pp, best_section.get(pp.slug))]
+    ekstra = _best_sections_for(mangler, terms) if mangler else {}
+    out = []
+    for sc, p in top:
+        d = p.head(); d["score"] = round(sc * 1000, 2); d["snippet"] = _snippet(p.body, terms, 160)
+        sec = _sec(p, best_section.get(p.slug)) or _sec(p, ekstra.get(p.slug))
         if sec:
             d["section"] = sec
         out.append(d)

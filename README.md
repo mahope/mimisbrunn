@@ -144,7 +144,7 @@ actually hits. On a 907-page vault, single core, embeddings off:
 
 | | p50 | p95 |
 |---|---|---|
-| `wiki_search`, all four lanes fused | 12.4 ms | 22.8 ms |
+| `wiki_search`, all four lanes fused | 13.9 ms | 25.0 ms |
 | `wiki_get` (72 kB page) | 0.01 ms | 0.02 ms |
 | `wiki_brief` | 11.8 ms | 16.0 ms |
 | `wiki_graph`, whole graph | 10.9 ms | 13.4 ms |
