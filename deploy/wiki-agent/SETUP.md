@@ -12,7 +12,7 @@ Gå til: https://github.com/settings/tokens?type=beta
 
 ## 2. Find Hostinger IMAP password
 
-Det er dit login-password til mads@mahope.dk (samme som webmail.hostinger.com).
+Det er login-passwordet til den mailkonto du satte i `HOSTINGER_EMAIL` (samme som webmail.hostinger.com).
 
 ## 3. Deploy i Dokploy
 

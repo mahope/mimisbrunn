@@ -7,7 +7,7 @@ set -euo pipefail
 REPO_URL="https://github.com/${WIKI_REPO}.git"
 
 git config --global user.name "wiki-inbox"
-git config --global user.email "wiki-inbox@mahope.dk"
+git config --global user.email "${GIT_AUTHOR_EMAIL:-wiki-inbox@example.com}"
 git config --global pull.rebase true
 # Token via credential-helper, aldrig i .git/config paa volumen (issue #28).
 git config --global credential.helper '!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'

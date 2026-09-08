@@ -9,7 +9,7 @@ REPO="${WIKI_REPO:-mahope/llm-wiki}"
 REPO_URL="https://github.com/${REPO}.git"
 
 git config --global user.name "wiki-mcp"
-git config --global user.email "wiki-mcp@mahope.dk"
+git config --global user.email "${GIT_AUTHOR_EMAIL:-wiki-mcp@example.com}"
 git config --global pull.rebase true
 # Tokenet leveres af en credential-helper der laeser env-varen paa kaldstidspunktet.
 # Enkeltcitationstegn er vigtige: konfigurationen gemmer teksten, ikke vaerdien, saa

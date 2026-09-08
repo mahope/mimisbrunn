@@ -8,7 +8,7 @@ if [ ! -d /wiki/.git ]; then
     echo "Cloning wiki repo..."
     git clone https://${GITHUB_TOKEN}@github.com/mahope/llm-wiki.git /wiki
     cd /wiki
-    git config user.email "wiki-agent@mahope.dk"
+    git config user.email "${GIT_AUTHOR_EMAIL:-wiki-agent@example.com}"
     git config user.name "Wiki Agent (Dokploy)"
 else
     echo "Wiki repo exists, pulling latest..."

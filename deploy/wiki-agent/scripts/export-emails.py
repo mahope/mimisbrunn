@@ -4,7 +4,7 @@ import os, re, html
 from datetime import datetime, timedelta
 from imap_tools import MailBox, AND
 
-EMAIL = os.environ.get("HOSTINGER_EMAIL", "mads@mahope.dk")
+EMAIL = os.environ.get("HOSTINGER_EMAIL", "")
 PASSWORD = os.environ.get("HOSTINGER_PASSWORD", "")
 OUT_BASE = "/wiki/_sources/emails-hostinger"
 FOLDERS = ["INBOX", "INBOX.Sent"]

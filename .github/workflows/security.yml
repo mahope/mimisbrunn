@@ -29,6 +29,17 @@ jobs:
       - name: Scan working tree
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 1
 
+  private-data:
+    name: No personal data in a public template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scan for emails, public IPs and phone numbers
+        run: python scripts/no-private-data.py
+
   trivy:
     name: Dependency and secret scan (trivy)
     runs-on: ubuntu-latest

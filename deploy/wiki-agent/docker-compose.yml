@@ -4,7 +4,7 @@ services:
     container_name: wiki-agent
     restart: unless-stopped
     environment:
-      - HOSTINGER_EMAIL=mads@mahope.dk
+      - HOSTINGER_EMAIL=${HOSTINGER_EMAIL:?saet din mailkonto}
       - HOSTINGER_PASSWORD=${HOSTINGER_PASSWORD}
       - RESEND_API_KEY=${RESEND_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
