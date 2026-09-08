@@ -17,7 +17,9 @@ Brug:
     python scripts/wiki-freshness.py --stale    # kun forældede sider
 Exit 0 altid (rapport, ikke gate).
 """
-import collections, datetime as dt, glob, json, os, re, sys
+import collections
+import pathlib
+import subprocess, datetime as dt, glob, json, os, re, sys
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -74,6 +76,39 @@ def to_date(v):
     return None
 
 
+
+CITE_SRC_RE = re.compile(r"_sources/([A-Za-z0-9._-]+)")
+
+
+def usikrede_citater():
+    """Citater der peger paa `_sources`-mapper som ikke er sporet i git.
+
+    Videnslaget ligger i git og er dermed sikret. Kildelaget er det kun delvist:
+    `.gitignore` udelukker `_sources/*` og goer undtagelse for de to mail-mapper.
+    Det er som regel en rigtig beslutning — resten fylder gigabyte — men konsekvensen
+    er at et citat kan pege paa en fil der findes ét sted i verden.
+
+    Et citat der ikke kan slaas op, er i praksis det samme som ingen kilde,
+    bortset fra at det ser ud som en.
+    """
+    try:
+        ud = subprocess.run(["git", "ls-files", "_sources"], cwd=os.fspath(ROOT),
+                            capture_output=True, text=True, encoding="utf-8", timeout=60).stdout
+    except Exception:
+        return {}, {}
+    sporet = {l.split("/")[1] for l in ud.splitlines() if l.count("/") >= 1}
+    tael, sider = collections.Counter(), collections.defaultdict(set)
+    for path in pathlib.Path(ROOT, "entities").glob("*/*.md"):
+        rel = str(path.relative_to(ROOT)).replace(chr(92), "/")
+        for mappe in CITE_SRC_RE.findall(path.read_text(encoding="utf-8", errors="replace")):
+            if mappe in sporet:
+                continue
+            if not pathlib.Path(ROOT, "_sources", mappe).exists():
+                continue          # forsvundet allerede, eller aldrig hentet
+            tael[mappe] += 1
+            sider[mappe].add(rel)
+    return tael, sider
+
 def check_all():
     issues = collections.defaultdict(list)
     stale = []
@@ -90,6 +125,12 @@ def check_all():
             continue
         for k in REQ:
             if k not in fm:
+                # `sources:` maa gerne mangle i frontmatter naar teksten selv baerer
+                # provenance ("> Kilde: samtale 2026-09-04"). Provenance-tjekket laengere
+                # nede accepterer det allerede, saa uden dette modsiger rapporten sig selv:
+                # samme side var baade "uden kilde" og "ikke uden kilde".
+                if k == "sources" and SOURCE_MARK_RE.search(body):
+                    continue
                 issues[f"missing-{k}"].append(rel)
         t = fm.get("type")
         if t == "redirect":
@@ -166,6 +207,16 @@ def main():
         print(f"## Uden kilde: {len(provenance)} sider har sources: [] og ingen kildemarkør i teksten")
         for rel in provenance[:30]:
             print(f"  {rel}")
+        print()
+    if flag in ("--all", "--provenance"):
+        tael, sider = usikrede_citater()
+        i_alt = sum(tael.values())
+        print(f"## Citater uden kopi uden for maskinen: {i_alt} i {len(tael)} kildemapper")
+        if i_alt:
+            print("  (kilden er ikke sporet i git. Et citat der ikke kan slås op, er i praksis")
+            print("   det samme som ingen kilde — bortset fra at det ser ud som en.)")
+            for mappe, n in tael.most_common(12):
+                print(f"  {n:>5}  _sources/{mappe}   ({len(sider[mappe])} sider)")
         print()
 
 
