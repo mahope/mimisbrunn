@@ -25,3 +25,16 @@ jobs:
         env:
           WIKI_EMBED: "0"
         run: python scripts/selftest.py
+
+      # Smoke test for the analysis scripts. They touch nothing and write nothing;
+      # the point is that they cannot break unnoticed, the way a patch once broke
+      # the MCP server. dns-check is deliberately left out — it queries DNS and
+      # would make CI flaky for reasons that have nothing to do with the code.
+      - name: Analysis scripts run
+        env:
+          WIKI_EMBED: "0"
+        run: |
+          python scripts/claims.py
+          python scripts/open-actions.py --days 3650
+          python scripts/wiki-lint.py
+          python scripts/wiki-freshness.py
