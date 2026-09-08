@@ -38,3 +38,18 @@ jobs:
           python scripts/open-actions.py --days 3650
           python scripts/wiki-lint.py
           python scripts/wiki-freshness.py
+
+      # wiki-cli is the cloud routines' only way into the vault. If it breaks, every
+      # routine fails — and they run on a different account, where a break is not
+      # visible from here. Read path only; append and create write.
+      - name: wiki-cli read path
+        env:
+          WIKI_EMBED: "0"
+        run: |
+          python scripts/wiki-cli.py --help
+          python scripts/wiki-cli.py recent
+          python scripts/wiki-cli.py stats
+          python scripts/wiki-cli.py brief
+          python scripts/wiki-cli.py commitments
+          python scripts/wiki-cli.py append --help
+          python scripts/wiki-cli.py create --help
