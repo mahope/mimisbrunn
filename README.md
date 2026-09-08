@@ -173,6 +173,7 @@ python scripts/answer-eval.py          # groundedness and abstention of the whol
 python scripts/selftest.py             # 21 invariants of the MCP tool surface (seconds, no network)
 python scripts/claims.py               # which claims in the vault a live source could verify
 python scripts/open-actions.py         # actions written down and never carried out
+python scripts/dns-check.py --ns       # domains the vault mentions that no longer resolve
 python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub
 python scripts/regen-index.py          # _index.md + hub pages
 ```
