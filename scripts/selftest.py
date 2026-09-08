@@ -92,7 +92,7 @@ def main() -> int:
     check("wiki_commitments svarer", lambda: isinstance(srv.wiki_commitments(), list))
     check("wiki_graph svarer", lambda: "edges" in srv.wiki_graph())
     check("wiki_brief har alle grupper",
-          lambda: {"overdue_commitments", "due_soon", "stale_active", "review_queue"} <= set(srv.wiki_brief()))
+          lambda: {"overdue_commitments", "due_soon", "stale_active", "review_queue", "open_actions"} <= set(srv.wiki_brief()))
     check("aftale-parseren læser formatet",
           lambda: srv._parse_commitment(
               "- [ ] (aftalt 2026-09-01, forfald 2026-09-10) Mads → [[x|X]]: noget",

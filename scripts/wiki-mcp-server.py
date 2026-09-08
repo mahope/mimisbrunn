@@ -1346,9 +1346,52 @@ def _recent_review_lines(limit: int = 5) -> list[str]:
     return out[-limit:]
 
 
+# --------------------------------------------------------------------------- aabne handlinger
+# En "- Handling: …"-linje i en log er ikke en aftale, og indtil nu holdt intet oeje med den.
+# Tre af dem laa 5 uger uudfoerte, mens de sites de handlede om koerte videre med gamle
+# WordPress-versioner. Bydeformen forrest skiller opgaven ("Opdatér X") fra reglen
+# ("ALDRIG klon ukendte repos"), som ikke forældes. Se scripts/open-actions.py.
+HANDLING_RE = re.compile(r"^\s*[-*]\s*Handling:\s*(.+)$", re.I)
+HANDLING_DATO_RE = re.compile(r"^\s*[-*]\s*\*\*(\d{4}-\d{2}-\d{2})")
+HANDLING_OPGAVE_RE = re.compile(
+    r"^(opdat[\u00e9e]r|revok[\u00e9e]r|rot[\u00e9e]r|slet|fjern|skift|installer|aktiv[\u00e9e]r|deaktiv[\u00e9e]r"
+    r"|kontroll[\u00e9e]r|verific[\u00e9e]r|identific[\u00e9e]r|tilf[\u00f8o]j|migrer|luk|geninstaller|udskift"
+    r"|genstart|opgrad[\u00e9e]r|nedgrad[\u00e9e]r|flyt|opret|k[\u00f8o]r)\b", re.I)
+HANDLING_LUKKET_RE = re.compile(r"\b(gjort|udf[\u00f8o]rt|l[\u00f8o]st|afklaret|done|fixed|lukket|afsluttet)\b", re.I)
+
+
+def _open_actions(min_days: int = 14) -> list[dict]:
+    """Handlinger der er skrevet ned, ser ud som opgaver og ikke er kvitteret."""
+    today = dt.date.today()
+    ud: list[dict] = []
+    for p in _INDEX.values():
+        if p.is_redirect or p.is_generated:
+            continue
+        dato = None
+        for nr, linje in enumerate(p.body.split("\n"), 1):
+            m_d = HANDLING_DATO_RE.match(linje)
+            if m_d:
+                dato = m_d.group(1)
+            m = HANDLING_RE.match(linje)
+            if not m:
+                continue
+            tekst = m.group(1).strip()
+            if not HANDLING_OPGAVE_RE.match(tekst) or HANDLING_LUKKET_RE.search(tekst):
+                continue
+            d = _to_date(dato) if dato else None
+            alder = (today - d).days if d else None
+            if alder is not None and alder < min_days:
+                continue
+            ud.append({"slug": p.slug, "line": nr, "date": dato, "age_days": alder,
+                       "action": tekst[:200]})
+    ud.sort(key=lambda h: -(h["age_days"] or 0))
+    return ud
+
+
 def wiki_brief(limit_per_group: int = 5) -> dict:
     """Dagens overblik i ét kald: forfaldne og nært forestående aftaler, aktive kunder og
-    projekter der er blevet forældede, nyt i review-køen, og hvornår vaulten sidst blev rørt.
+    projekter der er blevet forældede, nedskrevne handlinger der aldrig blev udført, nyt i
+    review-køen, og hvornår vaulten sidst blev rørt.
 
     Beregnet til at blive kaldt i starten af en session eller før et møde, i stedet for at
     lede flere steder. Hver gruppe er hårdt begrænset, så svaret kan læses på et skærmbillede."""
@@ -1370,6 +1413,8 @@ def wiki_brief(limit_per_group: int = 5) -> dict:
                       "last_updated": str(p.fm.get("last_updated", ""))})
     stale.sort(key=lambda r: r["last_updated"])
 
+    actions = _open_actions()
+
     recent = [p.head() for p in sorted(
         (p for p in _INDEX.values() if not p.is_redirect and not p.is_generated),
         key=lambda p: str(p.fm.get("last_updated", "")), reverse=True)[:n]]
@@ -1380,9 +1425,10 @@ def wiki_brief(limit_per_group: int = 5) -> dict:
         "due_soon": soon,
         "stale_active": stale[:n],
         "review_queue": _recent_review_lines(n),
+        "open_actions": actions[:n],
         "recently_updated": recent,
         "counts": {"commitments_open": len(commitments), "overdue": len([c for c in commitments if c["overdue_days"] > 0]),
-                   "stale_active": len(stale), "pages": len(_INDEX)},
+                   "stale_active": len(stale), "open_actions": len(actions), "pages": len(_INDEX)},
     }
 
 
@@ -1544,8 +1590,9 @@ def _p_daily_brief() -> str:
     return (
         "Kald wiki_brief() og skriv et kort dansk overblik ud fra svaret.\n\n"
         "Struktur: 1) forfaldne aftaler med hvem og hvor mange dage over, 2) aftaler der forfalder "
-        "inden for 14 dage, 3) aktive kunder og projekter der er blevet forældede, med hvor længe siden, "
-        "4) nye punkter i review-køen. Maks 15 linjer i alt.\n\n"
+        "inden for 14 dage, 3) nedskrevne handlinger der aldrig blev udført, ældste først — nævn "
+        "alderen, for det er hele pointen, 4) aktive kunder og projekter der er blevet forældede, "
+        "med hvor længe siden, 5) nye punkter i review-køen. Maks 18 linjer i alt.\n\n"
         "Slut med højst tre konkrete forslag til hvad Mads bør tage først, og hvorfor. "
         "Opfind intet: står der ikke noget i svaret, så skriv at der ikke er noget."
     )

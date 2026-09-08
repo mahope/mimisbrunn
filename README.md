@@ -49,6 +49,7 @@ Mimisbrunn is the [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555
 | Vector DB you have to run | SQLite FTS5 + optional local embeddings, rebuilt from the files |
 | Facts overwrite each other | Contradictions become callouts and a review queue; nothing is deleted, merges leave redirects |
 | "Trust me" search | A query set and `retrieval-eval.py` report recall@5 / MRR before and after every ranking change |
+| An action is written down and never done | `open-actions.py` and `wiki_brief` surface "Handling:" lines that look like tasks, are not signed off, and have aged — oldest first |
 | A patch quietly deletes half the server | `selftest.py` asserts the exact tool and prompt surface on every push; a missing function is a red build, not a surprise a week later |
 | Works in one app | MCP server: Claude Code, Claude app on your phone, claude.ai, any agent |
 | Grows until it rots | Freshness lint by type, `stale_after`, archived status, weekly reflect pass |
@@ -171,6 +172,7 @@ python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search
 python scripts/answer-eval.py          # groundedness and abstention of the whole tool chain
 python scripts/selftest.py             # 21 invariants of the MCP tool surface (seconds, no network)
 python scripts/claims.py               # which claims in the vault a live source could verify
+python scripts/open-actions.py         # actions written down and never carried out
 python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub
 python scripts/regen-index.py          # _index.md + hub pages
 ```
