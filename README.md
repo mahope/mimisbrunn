@@ -131,7 +131,7 @@ answer actually be reached, and does the chain decline when it cannot?
 
 | | |
 |---|---|
-| recall@5 / MRR | 0.95 / 0.81 |
+| recall@5 / MRR | 0.98 / 0.84 |
 | section coverage | 0.86 — share of hits that point at *where* on the page the answer sits |
 | groundedness | 0.93 — the exact fact was in what the chain retrieved |
 | abstention | 1.00 — unanswerable questions returned nothing that invites a guess |

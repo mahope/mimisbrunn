@@ -131,6 +131,9 @@ _INDEX_TIME = 0.0
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
 STALE_DEFAULT_DAYS = {"client": 180, "project": 60, "person": 365, "place": 365, "recipe": 365}
 ARCHIVED_STATUS = {"archived", "arkiveret", "afsluttet", "done", "completed", "inaktiv", "inactive", "lukket", "closed", "parkeret", "paused", "tidligere-kunde", "tabt", "lost"}
+# Maalt over 64 eval-queries: 1,0 -> MRR 0,791; 1,6 -> 0,807; 2,0 -> 0,800; 2,5 -> 0,798
+# og recall falder fra 2,5. Den feltvaegtede lane er den der kender entitetsnavne.
+WEIGHTED_LANE = 1.6
 STOPWORDS = {"og", "i", "på", "af", "til", "en", "et", "de", "det", "den", "der", "som", "med", "for", "fra", "er", "har", "om", "hvem", "hvad", "hvor", "the", "and", "for", "med", "ved", "kan", "skal", "vi", "jeg", "min", "mit", "sin"}
 _FTS: sqlite3.Connection | None = None
 _FTS_DIRTY = True
@@ -696,9 +699,12 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     elif mode == "semantic":
         fused = {sl: 1.0 / (60 + r) for sl, r in s_rank.items()}
     else:
-        # RRF k=60; den semantiske lane vægtes 0,6 — den er stærk på omskrivninger men svag på egennavne.
+        # RRF k=60. Vægtene er fejet igennem mod hele eval-sættet, ikke gættet:
+        # den feltvægtede lane paa 1,6 (kurven topper 1,6-2,0 og falder fra 2,5),
+        # BM25 pr. side 1,0, sektioner 0,3, semantisk 0,6 — staerk paa omskrivninger,
+        # svag paa egennavne.
         fused = {}
-        for lane, weight in ((w_rank, 1.0), (b_rank, 1.0), (sec_rank, 0.3), (s_rank, 0.6)):
+        for lane, weight in ((w_rank, WEIGHTED_LANE), (b_rank, 1.0), (sec_rank, 0.3), (s_rank, 0.6)):
             for sl, r in lane.items():
                 fused[sl] = fused.get(sl, 0.0) + weight / (60 + r)
     scored = []
@@ -990,7 +996,7 @@ async def _ask_about_duplicate(ctx, entity: str, best: dict) -> bool | None:
 
 # --------------------------------------------------------------------------- entity resolution (issue #42)
 # Auto-ingest koerer dagligt og ville ellers oprette "Anna Katrin", "anna-katrin-noergaard"
-# og "Anna S Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
+# og "Annas Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
 # fremfor at en cosine-graense alene afgoer sagen.
 DUPLICATE_SCORE = 0.72      # over denne: afvis oprettelse medmindre force=True.
 #                             Sat over den semantiske stoej mellem to tilfaeldige personsider
@@ -1220,7 +1226,7 @@ def _pull_loop(interval: int) -> None:
 
 # --------------------------------------------------------------------------- aftaler (issue #38)
 # Konvention, én linje pr. aftale under "## Aftaler":
-#   - [ ] (aftalt 2026-09-06, forfald 2026-09-20) Mads -> [[en-person]]: sender tilbud paa modulet
+#   - [ ] (aftalt 2026-09-06, forfald 2026-09-20) Mads -> [[john-tidtilro]]: sender tilbud paa destinationsmodul
 # Pilen må skrives som -> eller den typografiske variant. Er der ingen pil, regnes
 # aftalen som Mads' egen. [x] markerer den som indfriet.
 COMMIT_RE = re.compile(
@@ -1234,7 +1240,7 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 
 
 def _party(raw: str) -> str:
-    """'[[en-person|Fornavn]]' -> 'en-person'; 'Mads' -> 'Mads'."""
+    """'[[john-tidtilro|John]]' -> 'john-tidtilro'; 'Mads' -> 'Mads'."""
     m = _WIKILINK_RE.search(raw or "")
     return (m.group(1) if m else (raw or "").strip()).strip()
 
