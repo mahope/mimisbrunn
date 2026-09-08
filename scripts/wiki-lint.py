@@ -142,3 +142,74 @@ if flag in ("--all", "--dupes"):
     for k, fs in sorted(dupes.items()):
         print(f"  '{k}': " + " | ".join(os.path.relpath(f, ROOT) for f in sorted(fs)))
     print()
+
+# --------------------------------------------------------------------------- .base-visninger
+# Obsidian-visningerne i `_bases/` filtrerer paa frontmatter-felter. Bliver et felt omdoebt
+# eller aldrig udfyldt, staar visningen tom uden at fejle — og en tom visning ligner
+# "der er ikke noget" i stedet for "det virker ikke".
+#
+# Kun venstresiden af en sammenligning i et `filters`-udtryk tjekkes. Et foerste forsoeg
+# laeste alle identifikatorer i filen og meldte visningsnavne, mappestier og ASC som
+# manglende felter. En stoejende kontrol er vaerre end ingen.
+if flag in ("--all", "--bases"):
+    import yaml
+
+    FILTER_LHS = re.compile(r"(?:^|[\s(!])([a-z_][a-z0-9_]*)\s*(?:==|!=|>=|<=|>|<)")
+
+    def _filterudtryk(node, ud):
+        """Saml alle streng-udtryk under en filters-node, uanset and/or/not-indlejring."""
+        if isinstance(node, str):
+            ud.append(node)
+        elif isinstance(node, list):
+            for x in node:
+                _filterudtryk(x, ud)
+        elif isinstance(node, dict):
+            for v in node.values():
+                _filterudtryk(v, ud)
+
+    felt_antal = collections.Counter()
+    for f in FILES:
+        t = open(f, encoding="utf-8", errors="replace").read().replace("\r\n", "\n")
+        if not t.startswith("---"):
+            continue
+        slut = t.find("\n---", 3)
+        if slut < 0:
+            continue
+        for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*):", t[3:slut], re.M):
+            felt_antal[m.group(1)] += 1
+
+    base_dir = os.path.join(ROOT, "_bases")
+    fund = []
+    navne = sorted(os.listdir(base_dir)) if os.path.isdir(base_dir) else []
+    for navn in navne:
+        if not navn.endswith(".base"):
+            continue
+        raw = open(os.path.join(base_dir, navn), encoding="utf-8", errors="replace").read()
+        try:
+            doc = yaml.safe_load(raw) or {}
+        except Exception as e:
+            fund.append((navn, "(ugyldig yaml)", e.__class__.__name__))
+            continue
+        formler = set((doc.get("formulas") or {}).keys())
+        udtryk = []
+        _filterudtryk(doc.get("filters"), udtryk)
+        for v in (doc.get("views") or []):
+            _filterudtryk(v.get("filters"), udtryk)
+        felter = set()
+        for e in udtryk:
+            for m in FILTER_LHS.finditer(e):
+                n = m.group(1)
+                if n not in formler and n != "formula":
+                    felter.add(n)
+        for n in sorted(felter):
+            antal = felt_antal.get(n, 0)
+            if antal <= 1:
+                fund.append((navn, n, f"{antal} sider har feltet"))
+
+    print(f"## Base-visninger der filtrerer paa et felt naesten ingen har: {len(fund)}")
+    if fund:
+        print("  (visningen staar tom uden at fejle)")
+        for navn, felt, note in fund:
+            print(f"  {navn:<22} {felt:<22} {note}")
+    print()
+
