@@ -1,147 +1,68 @@
-# Answer-quality eval (issue #48). Måler noget andet end retrieval-eval:
-# ikke "kom den rigtige side med i top-5", men "kan svaret faktisk hentes ud af
-# de sektioner værktøjerne leverer, og bliver der sagt fra når svaret ikke findes".
+# Answer-quality eval. Måler noget andet end retrieval-eval: ikke "kom den rigtige
+# side med i top-5", men "kan svaret faktisk hentes ud af de sektioner værktøjerne
+# leverer, og bliver der sagt fra når svaret ikke findes".
 #
 # Felter pr. spørgsmål:
-#   q             spørgsmålet, formuleret som Mads ville stille det
+#   q             spørgsmålet, formuleret som du selv ville stille det
 #   expect        sider der SKAL kunne bære svaret (én af dem er nok)
 #   must_contain  en kort, ordret streng fra siden. Findes den ikke i det hentede,
 #                 er svaret ikke funderet, uanset hvad en model måtte skrive
 #   section       valgfri: den sektion svaret bør komme fra
-#   unanswerable  true når wikien IKKE indeholder svaret; så er det rigtige svar
+#   unanswerable  true når vaulten IKKE indeholder svaret; så er det rigtige svar
 #                 at sige fra. Disse må aldrig få et must_contain
 #
 # Kør: python scripts/answer-eval.py
 # Tilføj et spørgsmål hver gang et svar var forkert eller opfundet i praksis.
+#
+# ADVARSEL — dette er et offentligt repo.
+# Filen her er et tomt skelet med opdigtede eksempler. Dit eget sæt kommer til at
+# indeholde priser, IP-adresser, kundenavne og personlige fakta, for det er præcis
+# den slags spørgsmål der er værd at måle på. Hold det sæt i din egen private vault.
+# Den offentlige skabelon har haft rigtige tal liggende her før; det er rettet, men
+# lad være med at gentage fejlen når du forker.
 
+# --- Et faktum der står ordret på en side -----------------------------------
 - q: hvad er min timepris for eksisterende kunder
   expect: [priser-og-ydelser]
-  must_contain: "700 kr/t"
+  must_contain: "<din timepris>"
   section: Timepris
 
-- q: hvad koster teknisk partner-pakken om måneden
-  expect: [priser-og-ydelser]
-  must_contain: "15.000 kr/md"
+# --- Et faktum dybt nede på en lang side ------------------------------------
+# Den slags fanger om wiki_get's `omitted_sections` og sektionsvalget virker:
+# står svaret ved tegn 20.000 af 60.000, skal kæden kunne finde derhen.
+- q: hvad koster produktets billigste plan om måneden
+  expect: [<dit-produkt>]
+  must_contain: "<pris> kr/md"
 
-- q: hvad koster driftansvar micro
-  expect: [driftansvar-pakker, priser-og-ydelser, mads-holst-jensen]
-  must_contain: "2.500"
+# --- Infrastruktur ----------------------------------------------------------
+- q: hvad er ip-adressen på hovedserveren
+  expect: [<din-hostingudbyder>]
+  must_contain: "<ip>"
 
-- q: hvad koster resend pro
-  expect: [resend]
-  must_contain: "$20"
+- q: hvilken version kører vi af deployment-platformen
+  expect: [<din-platform>]
+  must_contain: "<version>"
 
-- q: hvor mange mails kan jeg sende på resend gratis
-  expect: [resend]
-  must_contain: "3.000 mails"
+# --- Relationer og aftaler --------------------------------------------------
+- q: hvem er kontaktperson hos <kunde>
+  expect: [<kunde>]
+  must_contain: "<navn>"
 
-- q: hvilken dokploy-version kører vi og hvorfor skulle vi opdatere
-  expect: [dokploy]
-  must_contain: "v0.30.4"
+- q: hvad venter jeg på fra <person> lige nu
+  expect: [<person>]
+  must_contain: "<hvad>"
 
-- q: hvad er ip-adressen på hovedserveren hos hetzner
-  expect: [hetzner]
-  must_contain: "37.27.0.164"
-
-- q: hvor mange vcpu har hetzner-main
-  expect: [hetzner]
-  must_contain: "8 vCPU"
-
-- q: må jeg opdatere klientsites til wordpress 7.1
-  expect: [wordpress]
-  must_contain: "Bricks 2.4"
-
-- q: hvad var wordpress-sikkerhedshullet i august
-  expect: [wordpress]
-  must_contain: "Imagick"
-
-- q: hvad kostede fase 1 til nexus advokater
-  expect: [nexus-advokater]
-  must_contain: "10.000 kr"
-
-- q: hvem er kontaktperson hos nexus advokater
-  expect: [nexus-advokater, mikkel-broens]
-  must_contain: "Mikkel"
-
-- q: hvad er prisestimatet på konkurrenceplatformen til kaare og emil
-  expect: [kaare-og-emil]
-  must_contain: "15.000"
-
-- q: hvornår skal konkurrenceplatformen være live
-  expect: [kaare-og-emil]
-  must_contain: "midt oktober"
-
-- q: hvad koster timetrack solo om måneden
-  expect: [timetrack]
-  must_contain: "99 kr/md"
-
-- q: hvem er kim kanstrup
-  expect: [kim-kanstrup, timetrack]
-  must_contain: "ITRaadgiveren"
-
-- q: hvad var problemet med acpt cache hos annas højskole
-  expect: [annas-hoejskole]
-  must_contain: "phpfastcache"
-
-- q: hvad kostede redesignet hos annas højskole i 2024
-  expect: [annas-hoejskole]
-  must_contain: "24.000 kr"
-
-- q: hvilket domæne bruger solaris til mail
-  expect: [solaris]
-  must_contain: "solaris.dk"
-
-- q: hvad skete der med solaris.dk den 9. juni
-  expect: [solaris]
-  must_contain: "404"
-
-- q: hvem er founder hos ovardo
-  expect: [ovardo]
-  must_contain: "Thomas Nedergaard Jensen"
-
-- q: hvilket domæne kører ovardos webapp på
-  expect: [ovardo]
-  must_contain: "app.ovardo.com"
-
-- q: hvad venter jeg på fra john lige nu
-  expect: [tidtilro-univers, john-tidtilro]
-  must_contain: "designudkast"
-  section: Aftaler
-
-- q: hvornår skiftede mads efternavn
-  expect: [mads-holst-jensen]
-  must_contain: "2022"
-
-- q: hvem er mads' mentor
-  expect: [mads-holst-jensen, andreas-knudsen]
-  must_contain: "Andreas Knudsen"
-
-- q: hvad hedder mcp-serveren til wikien og hvad kan den
-  expect: [wiki-mcp]
-  must_contain: "wiki_search"
-
-- q: hvordan undgår jeg at commits får ai-attribution
-  expect: [llm-wiki, claude-code]
-  must_contain: "attribution"
-
-- q: hvad er reglen for hemmeligheder i wikien
-  expect: [llm-wiki, wiki-mcp, second-brain-starter]
-  must_contain: "Bitwarden"
-
-# --- spørgsmål wikien IKKE kan svare på: her er det rigtige svar at sige fra ---
-
-- q: hvad er cvr-nummeret på huginn aviation
+# --- Abstention: vaulten ved det ikke, og skal sige fra ---------------------
+# Uden disse måler evalen kun om der kommer et svar, ikke om svaret er sandt.
+# En vidensbase der altid svarer er værre end en der siger fra.
+- q: hvor mange ansatte har <en virksomhed du intet ved om>
   expect: []
   unanswerable: true
 
-- q: hvor mange ansatte har kaare og emil
+- q: hvad er <en persons> blodtype
   expect: []
   unanswerable: true
 
-- q: hvilken bank bruger mahope
-  expect: []
-  unanswerable: true
-
-- q: hvad er mads' blodtype
+- q: hvad blev der besluttet på et møde der aldrig fandt sted
   expect: []
   unanswerable: true

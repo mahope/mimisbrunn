@@ -10,8 +10,9 @@ intel_dir = wiki / "_intel"
 sent_log = intel_dir / ".sent-briefings.json"
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-FROM_EMAIL = "noreply@mahoje.dk"
-TO_EMAIL = "mads@mahoje.dk"
+# Saet dem i miljoeet. En skabelon skal ikke baere vedligeholderens egen adresse.
+FROM_EMAIL = os.environ.get("BRIEFING_FROM", "noreply@example.com")
+TO_EMAIL = os.environ.get("BRIEFING_TO", "")
 
 def get_sent_briefings():
     if sent_log.exists():

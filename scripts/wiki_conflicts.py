@@ -65,12 +65,12 @@ def _selftest():
     cases = [
         ("Timepris 900 kr/time aftalt.", "Timepris 950 kr/time fra oktober.", 1),
         ("Timepris 900 kr/time aftalt.", "Timepris 900 kr/time bekræftet.", 0),
-        ("Kontaktperson er Thea Lynggren.", "Kontaktperson: Frederik Lund.", 1),
+        ("Kontaktperson er Anna Eksempel.", "Kontaktperson: Bo Eksempel.", 1),
         ("Sitet kører på Hetzner (fsn1).", "Sitet kører nu hos Webdock.", 1),
         ("WordPress 6.8 installeret.", "WordPress 7.0 opdateret.", 1),
-        ("Mail: info@solpaneler.eu", "Ny mail: kontakt@solpaneler.eu", 1),
-        ("Mail: info@solpaneler.eu og fj@solpaneler.eu", "Skriv til fj@solpaneler.eu", 0),
-        ("Tlf. 62 65 10 16.", "Ring 62 65 10 17.", 1),
+        ("Mail: info@eksempel.dk", "Ny mail: kontakt@eksempel.dk", 1),
+        ("Mail: info@eksempel.dk og bo@eksempel.dk", "Skriv til bo@eksempel.dk", 0),
+        ("Tlf. 12 34 56 78.", "Ring 12 34 56 79.", 1),
         ("Pakke 2 koster 45.000 kr", "Pakke 2 koster 45.000 kr inkl. moms", 0),
     ]
     ok = True

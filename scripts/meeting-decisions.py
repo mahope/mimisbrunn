@@ -12,8 +12,8 @@ Hver skrevet linje bærer det ordrette citat og hvem der sagde det, og får
 
 Brug:
   python scripts/meeting-decisions.py _sources/meetings/2026-07-08-....md
-  python scripts/meeting-decisions.py <fil> --apply 2,5 --slug tidtilro-univers
-  python scripts/meeting-decisions.py <fil> --apply 3 --slug john-tidtilro --commitment --due 2026-10-01
+  python scripts/meeting-decisions.py <fil> --apply 2,5 --slug <projekt-slug>
+  python scripts/meeting-decisions.py <fil> --apply 3 --slug <person-slug> --commitment --due 2026-10-01
 """
 import argparse
 import importlib.util

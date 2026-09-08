@@ -3,7 +3,7 @@
 Progressiv opsummering af lange logsider (issue #49).
 
 Store sider er et reelt problem, ikke et æstetisk: målt i answer-eval kunne fakta i
-`timetrack.md` (60 KB) og `ovardo.md` (48 KB) hverken findes eller læses, fordi BM25
+`et-projekt.md` (60 KB) og `en-kunde.md` (48 KB) hverken findes eller læses, fordi BM25
 straffer lange sider og `wiki_get` afkorter. Sektions-indekset hjalp på det første;
 dette script tager det andet.
 
