@@ -16,6 +16,7 @@ Brug:
   python scripts/open-actions.py --days 0        # alle opgaver
   python scripts/open-actions.py --all           # også råd og regler
   python scripts/open-actions.py --json
+  python scripts/open-actions.py --som-aftaler   # klar til at klippe ind under ## Aftaler
 """
 import argparse
 import datetime as dt
@@ -79,6 +80,8 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="tag også råd og regler med")
     ap.add_argument("--limit", type=int, default=30)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--som-aftaler", action="store_true",
+                    help="skriv forslagene ud som aftale-linjer, klar til at klippe ind")
     a = ap.parse_args()
 
     alle = find_handlinger()
@@ -90,6 +93,24 @@ def main() -> int:
 
     if a.json:
         print(json.dumps(valgt, ensure_ascii=False, indent=2))
+        return 0
+
+    if a.som_aftaler:
+        # En handling i en log er ikke noget nogen bliver mindet om. Som aftale under
+        # `## Aftaler` fanger wiki_brief den, når fristen overskrides.
+        #
+        # Forfaldsdatoen står med vilje som <FORFALD>. Den er ejerens beslutning, og en
+        # opfundet dato ville se ud som en aftale nogen havde indgået. `aftalt` tages
+        # derimod fra den dato handlingen faktisk blev skrevet — den er kendt.
+        print("# Forslag til aftale-linjer. Sæt <FORFALD> og klip ind under `## Aftaler`")
+        print("# på den relevante side. Slet Handling-linjen samme sted, så den ikke")
+        print("# står to steder.\n")
+        for h in valgt[: a.limit]:
+            aftalt = h["dato"] or "<AFTALT>"
+            hvad = re.sub(r"\s+", " ", h["tekst"]).strip()
+            print(f"- [ ] (aftalt {aftalt}, forfald <FORFALD>) Mads → [[{h['side']}]]: {hvad[:140]}")
+            print(f"      # {h['sti']}:{h['linje']}"
+                  + (f"  ({h['alder']} dage gammel)" if h["alder"] is not None else ""))
         return 0
 
     opgaver = sum(1 for h in alle if h["opgave"])
