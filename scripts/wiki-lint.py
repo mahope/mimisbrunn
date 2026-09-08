@@ -180,7 +180,14 @@ if flag in ("--all", "--bases"):
 
     base_dir = os.path.join(ROOT, "_bases")
     fund = []
-    navne = sorted(os.listdir(base_dir)) if os.path.isdir(base_dir) else []
+    # I en tom vault (skabelonen) har intet felt daekning, og tjekket ville melde alt.
+    # Samme grund som selftest springer sine indholdstjek over under 100 sider.
+    if len(FILES) < 100:
+        print("## Base-visninger: springes over, vaulten har "
+              f"{len(FILES)} sider (skabelon)\n")
+        navne = []
+    else:
+        navne = sorted(os.listdir(base_dir)) if os.path.isdir(base_dir) else []
     for navn in navne:
         if not navn.endswith(".base"):
             continue
@@ -206,10 +213,11 @@ if flag in ("--all", "--bases"):
             if antal <= 1:
                 fund.append((navn, n, f"{antal} sider har feltet"))
 
-    print(f"## Base-visninger der filtrerer paa et felt naesten ingen har: {len(fund)}")
-    if fund:
-        print("  (visningen staar tom uden at fejle)")
-        for navn, felt, note in fund:
-            print(f"  {navn:<22} {felt:<22} {note}")
-    print()
+    if len(FILES) >= 100:
+        print(f"## Base-visninger der filtrerer paa et felt naesten ingen har: {len(fund)}")
+        if fund:
+            print("  (visningen staar tom uden at fejle)")
+            for navn, felt, note in fund:
+                print(f"  {navn:<22} {felt:<22} {note}")
+        print()
 
