@@ -174,6 +174,7 @@ python scripts/selftest.py             # 21 invariants of the MCP tool surface (
 python scripts/claims.py               # which claims in the vault a live source could verify
 python scripts/open-actions.py         # actions written down and never carried out
 python scripts/dns-check.py --ns       # domains the vault mentions that no longer resolve
+python scripts/no-private-data.py      # emails, public IPs and phone numbers (public template only)
 python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub
 python scripts/regen-index.py          # _index.md + hub pages
 ```
@@ -205,6 +206,7 @@ A second brain reads your mail, your invoices and your servers, so the interesti
 2. **The pre-commit hook blocks it.** `git config core.hooksPath .githooks` once, and staged changes containing a Resend, GitHub, OpenAI, AWS, Slack, Google or Stripe key, or a private key block, are refused before they reach a commit.
    The same `.githooks` directory holds a `pre-push` hook that runs `selftest.py` when the MCP server changed, so a broken tool surface never reaches the remote. If you already set a global `core.hooksPath`, it wins over the repository's own directory — give the global hook a two-line dispatcher that execs `$(git rev-parse --show-toplevel)/.githooks/pre-push` when that file exists, and repository hooks work again.
 3. **CI catches what slipped through.** gitleaks scans the full history and the working tree, trivy scans dependencies and files; both fail the build.
+4. **A secret scanner is not enough for a public template.** gitleaks looks for credentials — things with a shape, like `sk-…` or a private key block. An email address, a phone number and a server's IP have no shape; they are sensitive only because of whose they are. `no-private-data.py` checks those three classes and runs as its own CI job. `.allowed-data` is the escape hatch and is empty on purpose — adding a line there is a decision a reviewer gets to see. This repository shipped an hourly rate, a production IP and client names in an eval file before that job existed.
 
 A separate `quality` workflow runs `selftest.py` on every push. It builds the index and asserts that exactly the fourteen tools and four prompts are registered, that `ctx` never leaks into `wiki_create`'s public schema, and that the write guards still refuse secrets, uncited answers and unknown sources. The content checks skip themselves in an empty vault, so the template and a real vault run the same test.
 
