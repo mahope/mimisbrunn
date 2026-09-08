@@ -40,7 +40,7 @@ sorted_names = sorted(entity_map.keys(), key=len, reverse=True)
 
 # Filter out very common words that happen to be entity names
 SKIP_NAMES = {"vue", "mysql", "redis", "plane", "buffer", "dash", "acf",
-              "tea", "jens", "marie", "malthe"}
+              "anna", "bo", "cira", "dagmar"}
 
 def is_inside_wikilink(text, start, end):
     depth = 0

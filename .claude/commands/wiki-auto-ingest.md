@@ -85,7 +85,7 @@ Før du gør noget andet, afgør hvad kilden HANDLER OM. Læs hele indholdet og 
 - `_sources/facebook/`
 
 **Skip altid:**
-- `_sources/rclone-solaris/`, `rclone-spejder/`, `rclone-personligt/` (for store)
+- `_sources/rclone-arkiv/`, `rclone-billeder/`, `rclone-personligt/` (for store)
 - `_sources/claude-history/` (separat flow)
 - `_sources/boliger/` (allerede ingestet)
 

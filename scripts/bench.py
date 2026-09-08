@@ -38,7 +38,7 @@ except Exception:  # pragma: no cover
 QUERIES = [
     "hetzner",
     "hetzner server pris",
-    "hvem hoster nordic surgery lab",
+    "hvem hoster en-kunde",
     "dokploy compose redeploy bygger ikke",
     "resend api",
     "hvad aftalte jeg med john",

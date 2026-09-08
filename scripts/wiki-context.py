@@ -194,7 +194,7 @@ def main():
             if resource and n in resource: score += 10 * w
             joined = slug.replace("-", "")
             if slug == n or entity == n or n in aliases: score += 8 * w
-            # "kaareogemil" skal ramme siden "kaare-og-emil": mappenavne har sjaeldent bindestreger
+            # "enkundeogen" skal ramme siden "en-kunde-og-en": mappenavne har sjaeldent bindestreger
             elif len(n) > 5 and (joined == n.replace("-", "") or entity.replace(" ", "") == n): score += 7 * w
             elif slug.startswith(n) or n in slug: score += 3 * w
             elif n in tags: score += 3 * w

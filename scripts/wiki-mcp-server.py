@@ -996,7 +996,7 @@ async def _ask_about_duplicate(ctx, entity: str, best: dict) -> bool | None:
 
 # --------------------------------------------------------------------------- entity resolution (issue #42)
 # Auto-ingest koerer dagligt og ville ellers oprette "Anna Katrin", "anna-katrin-noergaard"
-# og "Annas Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
+# og "En S Hoejskole" som tre sider. Kandidaterne vises, og tvivlstilfaelde afvises,
 # fremfor at en cosine-graense alene afgoer sagen.
 DUPLICATE_SCORE = 0.72      # over denne: afvis oprettelse medmindre force=True.
 #                             Sat over den semantiske stoej mellem to tilfaeldige personsider
@@ -1226,7 +1226,7 @@ def _pull_loop(interval: int) -> None:
 
 # --------------------------------------------------------------------------- aftaler (issue #38)
 # Konvention, én linje pr. aftale under "## Aftaler":
-#   - [ ] (aftalt 2026-09-06, forfald 2026-09-20) Mads -> [[john-tidtilro]]: sender tilbud paa destinationsmodul
+#   - [ ] (aftalt 2026-09-06, forfald 2026-09-20) Mads -> [[en-person]]: sender tilbud paa modulet
 # Pilen må skrives som -> eller den typografiske variant. Er der ingen pil, regnes
 # aftalen som Mads' egen. [x] markerer den som indfriet.
 COMMIT_RE = re.compile(
@@ -1240,7 +1240,7 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]")
 
 
 def _party(raw: str) -> str:
-    """'[[john-tidtilro|John]]' -> 'john-tidtilro'; 'Mads' -> 'Mads'."""
+    """'[[en-person|Fornavn]]' -> 'en-person'; 'Mads' -> 'Mads'."""
     m = _WIKILINK_RE.search(raw or "")
     return (m.group(1) if m else (raw or "").strip()).strip()
 
@@ -1450,7 +1450,7 @@ def wiki_answer(question: str, answer: str, cites: list[str], stale_days: int = 
                 confidence: str = "medium") -> dict:
     """Arkivér et svar som en side i entities/answers/ med de kilder det bygger paa.
 
-    `cites` er stier som `entities/clients/solaris.md#Drift` — samme form som wiki_get
+    `cites` er stier som `entities/clients/en-kunde.md#Drift` — samme form som wiki_get
     returnerer i `path`. Mindst \u00e9n citation er paakraevet: et svar uden kilder er en
     paastand. Siden faar `stale_after`, saa den selv melder sig naar den boer efterproeves,
     og `wiki-lint.py` advarer hvis en kilde forsvinder."""

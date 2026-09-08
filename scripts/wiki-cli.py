@@ -7,7 +7,7 @@ Formaal: cloud-routiner har ikke MCP-adgang til wiki-mcp, og laeste derfor hele
 fandtes. Med dette script kan de soege og skrive praecist i stedet (issue #30).
 
 Brug:
-  python scripts/wiki-cli.py search "solaris hosting" [--type client] [--limit 5] [--json]
+  python scripts/wiki-cli.py search "en kunde hosting" [--type client] [--limit 5] [--json]
   python scripts/wiki-cli.py outline solaris
   python scripts/wiki-cli.py get solaris [--section "Aftaler"] [--max-chars 4000]
   python scripts/wiki-cli.py related solaris

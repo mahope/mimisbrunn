@@ -41,7 +41,7 @@ HUBS = {
                       lambda cat, fm: cat in ("tools", "concepts") and bool({"wordpress", "bricks", "bricks-builder", "woocommerce", "acf"} & {str(t).lower() for t in (fm.get("tags") or [])})),
     "ai-og-agenter": ("AI og agenter", "Tools og koncepter tagget ai/agents/mcp/claude-code.",
                       lambda cat, fm: cat in ("tools", "concepts") and bool({"ai", "agents", "agenter", "mcp", "claude-code", "llm", "second-brain"} & {str(t).lower() for t in (fm.get("tags") or [])})),
-    "spejder": ("Spejder (DDS, KFUM, Solaris)", "Alt tagget spejder/dds/kfum/solaris.",
+    "forening": ("Foreningsliv", "Alt tagget forening/frivillig.",
                       lambda cat, fm: bool({"spejder", "dds", "kfum", "solaris"} & {str(t).lower() for t in (fm.get("tags") or [])})),
     "egne-produkter": ("Egne produkter og infrastruktur", "Projekter tagget egenprodukt/saas/infrastructure eller mahope-værktøjer.",
                       lambda cat, fm: cat == "projects" and bool({"egenprodukt", "saas", "saas-potentiale", "infrastructure", "infrastruktur", "mahope", "mahoje"} & {str(t).lower() for t in (fm.get("tags") or [])})),

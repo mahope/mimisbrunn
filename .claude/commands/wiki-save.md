@@ -10,8 +10,8 @@ Hurtig opdatering af LLM Wiki i `{{WIKI_PATH}}`.
 ## Input
 
 `$ARGUMENTS` — en kort beskrivelse af hvad der skal gemmes, f.eks.:
-- `Tektrol bruger nu WooCommerce i stedet for custom booking`
-- `Ny kunde: DMC Nordic, kontakt Lars Hansen, WordPress site`
+- `En Kunde bruger nu WooCommerce i stedet for custom booking`
+- `Ny kunde: Nordlys ApS, kontakt Anna Eksempel, WordPress site`
 - `Dokploy kræver at man sætter NIXPACKS_NODE_VERSION`
 
 ## Procedure
