@@ -16,8 +16,8 @@ Sådan afgøres det:
 Noten er to linjer og skrives med wiki_append, så modsigelsestjek og commit følger med.
 Hooket skriver aldrig nye sider og fejler altid stille — det må ikke blokere Claude.
 
-Test manuelt:
-  echo '{"cwd":"C:/Users/mads_/Documents/Projekter/fridayy"}' | python scripts/wiki-session-note.py --dry-run
+Test manuelt (--dry-run siger hvilken port der lukkede, hvis den ikke skriver):
+  echo '{"cwd":"C:/Projects/Egne/et-projekt"}' | python scripts/wiki-session-note.py --dry-run
 """
 import datetime as dt
 import json
@@ -113,25 +113,35 @@ def main() -> int:
     except Exception:
         payload = {}
     cwd = payload.get("cwd") or os.getcwd()
+
+    def stop(hvorfor: str) -> int:
+        # Hooket skal fejle stille i drift, men et --dry-run uden begrundelse er
+        # umuligt at skelne fra et hook der er gaaet i stykker. Fem tavse returns
+        # gav praecis den tvivl, saa dry-run siger nu hvilken port der lukkede.
+        if dry:
+            print(f"[dry-run] skriver ikke: {hvorfor}")
+        return 0
+
     if Path(cwd).resolve() == WIKI.resolve():
-        return 0                      # i vaulten skriver man direkte
+        return stop("kaldt inde i selve vaulten — der skrives direkte")
 
     hit = latest_hit(cwd)
     if not hit:
-        return 0
+        return stop(f"ingen navnematch for {Path(cwd).name!r} i {LOG.name} "
+                    f"(kraever score >= {MIN_SCORE})")
     rec, slug = hit
 
     started = dt.datetime.fromisoformat(rec["ts"])
     minutes = (dt.datetime.now() - started).total_seconds() / 60
     if minutes < MIN_MINUTES and not dry:
-        return 0
+        return stop(f"sessionen varede {minutes:.0f} min, graensen er {MIN_MINUTES}")
 
     files = changed_files(cwd)
     if not files:
-        return 0
+        return stop(f"ingen aendrede filer i {Path(cwd).name} — intet at fortaelle")
 
     if already_written(slug) and not dry:
-        return 0
+        return stop(f"der er allerede skrevet en note til [[{slug}]] i dag")
 
     today = dt.date.today()
     months = ["januar", "februar", "marts", "april", "maj", "juni", "juli",
