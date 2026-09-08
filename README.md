@@ -170,6 +170,7 @@ python scripts/wiki-freshness.py       # frontmatter, stale pages per type, unda
 python scripts/retrieval-eval.py       # recall@5 / MRR of wiki_search
 python scripts/answer-eval.py          # groundedness and abstention of the whole tool chain
 python scripts/selftest.py             # 21 invariants of the MCP tool surface (seconds, no network)
+python scripts/claims.py               # which claims in the vault a live source could verify
 python scripts/wiki-merge.py A B --dry-run   # merge two pages, leave a redirect stub
 python scripts/regen-index.py          # _index.md + hub pages
 ```
