@@ -10,9 +10,9 @@ Brug:
   python scripts/wiki-cli.py search "en kunde hosting" [--type client] [--limit 5] [--json]
   python scripts/wiki-cli.py outline en-kunde
   python scripts/wiki-cli.py get en-kunde [--section "Aftaler"] [--max-chars 4000]
-  python scripts/wiki-cli.py related solaris
+  python scripts/wiki-cli.py related en-kunde
   python scripts/wiki-cli.py recent [--days 7]
-  python scripts/wiki-cli.py append solaris "- **6. september 2026:** ..." [--section Noter] [--source "samtale 2026-09-06"]
+  python scripts/wiki-cli.py append en-kunde "- **6. september 2026:** ..." [--section Noter] [--source "samtale 2026-09-06"]
   python scripts/wiki-cli.py create tool nyt-vaerktoej "Nyt Vaerktoej" "Én saetning." "# Nyt Vaerktoej\n\nTekst."
 
 Alle skrivninger gaar gennem de samme regler som MCP'en: hemmeligheds-tjek,
