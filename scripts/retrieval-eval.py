@@ -30,8 +30,13 @@ def main():
     if a.mode in ("rrf", "semantic") and not srv._EMB_DISABLED:
         srv._emb_refresh()
     hits = 0; rr = 0.0; misses = []
+    # Sektions-daekning: baerer hittet et pejlemaerke til HVOR paa siden svaret staar?
+    # Uden det maa en model laese 12.000 tegn af en side der kan vaere 63.000 lang.
+    n_hits = 0; n_sec = 0
     for q in queries:
         res = srv.wiki_search(q["q"], limit=a.k, mode=a.mode)
+        n_hits += len(res)
+        n_sec += sum(1 for r in res if r.get("section"))
         slugs = [r["slug"] for r in res]
         rank = next((i for i, s in enumerate(slugs) if s in q["expect"]), None)
         if rank is not None:
@@ -41,7 +46,9 @@ def main():
         if a.verbose:
             print(f"{'OK ' if rank is not None else 'MISS'} {q['q']!r:40} -> {slugs[:3]}")
     n = len(queries)
-    print(f"mode={a.mode} k={a.k} queries={n} recall@{a.k}={hits/n:.2f} MRR={rr/n:.2f}")
+    daek = (n_sec / n_hits) if n_hits else 0.0
+    print(f"mode={a.mode} k={a.k} queries={n} recall@{a.k}={hits/n:.2f} MRR={rr/n:.2f} "
+          f"sektionsdækning={daek:.2f} ({n_sec}/{n_hits})")
     for q, exp, got in misses:
         print(f"  MISS {q!r}: forventede {exp}, fik {got}")
 

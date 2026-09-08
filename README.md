@@ -123,7 +123,20 @@ Every fact is *timeless*, *dated* (`(as of 2026-09, source)`) or a *pointer* to 
 | `wiki_append(slug, text, section?, source?)` | Add knowledge; deterministic contradiction check (email, phone, price, version, contact, hosting) → callout + `_review-queue.md`. Commits. |
 | `wiki_create(type, slug, entity, description, body, …)` | New page by the schema; refuses duplicates and secrets. |
 
-Search quality is measured, not assumed: `python scripts/retrieval-eval.py --mode rrf` runs `scripts/eval/queries.yaml` and prints recall@5 and MRR. Add a query every time a real search misses.
+Search quality is measured, not assumed. `python scripts/retrieval-eval.py --mode rrf` runs
+`scripts/eval/queries.yaml` and prints recall@5, MRR and section coverage; `python scripts/answer-eval.py`
+runs the whole tool chain against `scripts/eval/answers.yaml` and asks a harder question — could the
+answer actually be reached, and does the chain decline when it cannot?
+
+| | |
+|---|---|
+| recall@5 / MRR | 0.95 / 0.81 |
+| section coverage | 0.86 — share of hits that point at *where* on the page the answer sits |
+| groundedness | 0.93 — the exact fact was in what the chain retrieved |
+| abstention | 1.00 — unanswerable questions returned nothing that invites a guess |
+
+Add a query every time a real search misses. Both evals are deterministic: no model is involved,
+so a ranking change is a number that moved, not an impression.
 
 Speed is measured too, and by a script you can re-run rather than a number someone
 once typed: `python scripts/bench.py` reports p50/p95/max over the paths a model

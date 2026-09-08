@@ -192,12 +192,26 @@ def _fts_rebuild() -> None:
     for p in _INDEX.values():
         if p.is_redirect or p.is_generated:
             continue
-        for head, text in _sections(p.body):
-            if len(text.strip()) > 30:
-                rows.append((p.slug, f"{p.entity} {head}", text))
+        for head, text in _indexable_sections(p):
+            rows.append((p.slug, f"{p.entity} {head}", text))
     con.executemany("INSERT INTO fts_sec VALUES (?,?,?)", rows)
     con.commit()
     _FTS, _FTS_DIRTY = con, False
+
+
+# Rene navigationssektioner er linklister. De matcher mange termer, fordi de naevner
+# mange entiteter, men de indeholder aldrig svaret — samme grund til at genererede
+# hub-sider holdes ude af sideindekset. "Relationer" hoerer IKKE med her: typede
+# relationer (- hoster-hos:: [[hetzner]]) er fakta.
+NAV_SECTIONS = {"se også", "se ogsaa", "see also"}
+
+
+def _indexable_sections(p: "Page"):
+    for head, text in _sections(p.body):
+        if head.strip().lower() in NAV_SECTIONS:
+            continue
+        if len(text.strip()) > 30:
+            yield head, text
 
 
 def _fts_rows(p: "Page"):
@@ -206,9 +220,8 @@ def _fts_rows(p: "Page"):
                 str(p.fm.get("description", "")), " ".join(str(t) for t in (p.fm.get("tags") or [])), p.body)
     sec_rows = []
     if not p.is_generated:
-        for head, text in _sections(p.body):
-            if len(text.strip()) > 30:
-                sec_rows.append((p.slug, f"{p.entity} {head}", text))
+        for head, text in _indexable_sections(p):
+            sec_rows.append((p.slug, f"{p.entity} {head}", text))
     return page_row, sec_rows
 
 
@@ -265,6 +278,32 @@ def _bm25_sections(terms: list[str], limit: int = 40) -> list[tuple[str, str]]:
         if len(out) >= limit:
             break
     return out
+
+
+def _best_section_for(slug: str, terms: list[str]) -> str | None:
+    """Bedste sektion paa én bestemt side. Sektionsbanen er en global top-N, saa en side der
+    vinder paa de andre baner kan ende uden sektion — og saa maa modellen gaette hvor i en
+    63.000 tegn lang side svaret staar. Her spoerges der maalrettet, kun for de faa sider
+    der faktisk returneres."""
+    q = " OR ".join('"' + t.replace('"', "") + '"*' for t in terms if t)
+    if not q:
+        return None
+    with _FTS_LOCK:
+        if _FTS is None or _FTS_DIRTY:
+            _fts_sync()
+        try:
+            rows = _FTS.execute(
+                "SELECT heading FROM fts_sec WHERE fts_sec MATCH ? AND slug = ? "
+                "ORDER BY bm25(fts_sec, 0, 3.0, 1.0) LIMIT 5", (q, slug)).fetchall()
+        except sqlite3.OperationalError:
+            return None
+    # Intro-sektionen er gemt med tom overskrift og er ubrugelig som pejlemaerke:
+    # den staar allerede oeverst paa siden. Tag den foerste rigtige overskrift.
+    ent = (_INDEX[slug].entity if slug in _INDEX else "")
+    for (heading,) in rows:
+        if heading[len(ent):].strip() if heading.startswith(ent) else heading.strip():
+            return heading
+    return None
 
 
 def _bm25(terms: list[str], limit: int = 50) -> list[str]:
@@ -586,6 +625,12 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     `mode` = rrf (default, fire lanes: feltvaegtet match, BM25 pr. side, BM25 pr. sektion og semantisk) | bm25 | weighted | sections | semantic (til evaluering). Hits faar `section` = den bedste overskrift, saa naeste kald kan vaere wiki_get(slug, section=...)."""
     _refresh()
     raw_terms = [t for t in re.split(r"\s+", query.lower().strip()) if t]
+    # Dansk skriver sammensatte ord med bindestreg: "dokploy-version", "wordpress-sikkerhedshullet".
+    # Uden dette matcher "dokploy-version" ikke siden [[dokploy]], og navneboostet paa 10 udebliver.
+    # Delene tilfoejes ud over det hele ord, saa den eksakte sammensaetning stadig vejer tungest.
+    for t in list(raw_terms):
+        if "-" in t:
+            raw_terms += [d for d in t.split("-") if len(d) > 2 and d not in raw_terms]
     # Stopord/korte ord (i, og, på, af, en …) drukner signalet i term-match — behold dem kun hvis intet andet er tilbage.
     terms = [t for t in raw_terms if len(t) > 2 and t not in STOPWORDS] or raw_terms
     if not terms:
@@ -662,10 +707,14 @@ def wiki_search(query: str, type: str = "", limit: int = 8, mode: str = "rrf") -
     out = []
     for sc, p in scored[: max(1, min(limit, 30))]:
         d = p.head(); d["score"] = round(sc * 1000, 2); d["snippet"] = _snippet(p.body, terms, 160)
-        hd = best_section.get(p.slug)
-        if hd:
-            # overskriften er gemt som "<entity> <overskrift>" i indekset
-            d["section"] = hd[len(p.entity):].strip() if hd.startswith(p.entity) else hd
+        # overskriften er gemt som "<entity> <overskrift>" i indekset
+        def _sec(hd):
+            if not hd:
+                return ""
+            return hd[len(p.entity):].strip() if hd.startswith(p.entity) else hd.strip()
+        sec = _sec(best_section.get(p.slug)) or _sec(_best_section_for(p.slug, terms))
+        if sec:
+            d["section"] = sec
         out.append(d)
     return out
 
@@ -745,8 +794,19 @@ def wiki_get(slug: str, section: str = "", max_chars: int = 12000, as_of: str = 
             return {"error": f"Ingen sektion '{section}'", "sections": [h for h, _ in _sections(body) if h]}
         body = f"## {match[0][0]}\n\n{match[0][1]}"
     truncated = len(body) > max_chars
-    return {**p.head(), "sources": p.fm.get("sources") or [], "aliases": p.fm.get("aliases") or [],
-            "resource": p.fm.get("resource"), "body": body[:max_chars], "truncated": truncated}
+    out = {**p.head(), "sources": p.fm.get("sources") or [], "aliases": p.fm.get("aliases") or [],
+           "resource": p.fm.get("resource"), "body": body[:max_chars], "truncated": truncated}
+    if truncated:
+        # Et `truncated: true` alene er ikke nok. Paa timetrack laa prisen ved tegn 20.194 af
+        # 63.257: en model fik de foerste 12.000 tegn, saa ingen pris, og intet spor af at der
+        # fandtes en prissektion. Naar de klippede overskrifter staar i svaret, kan den hente
+        # den rigtige sektion i stedet for at gaette.
+        out["omitted_chars"] = len(body) - max_chars
+        out["omitted_sections"] = [mm.group(1).strip() for mm in
+                                   re.finditer(r"^## (.+)$", body, re.M) if mm.start() >= max_chars]
+        out["note"] = ("Siden er klippet. Staar svaret maaske i en af omitted_sections, saa hent den "
+                       "med wiki_get(slug, section=...) foer du svarer.")
+    return out
 
 
 def wiki_related(slug: str) -> dict:

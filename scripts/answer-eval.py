@@ -46,6 +46,16 @@ MAX_SECTIONS = 3       # hvor mange sektioner pr. side den henter
 PAGE_CHARS = 12000     # hvor meget af siden der laeses hvis sektionsvalget ikke raekker
 
 
+def _bedste_udeladte(headings: list, terms: list[str], antal: int = 2) -> list[str]:
+    """De klippede sektioner der ligner spoergsmaalet mest. Samme fattige heuristik som
+    resten af kaeden bruger: ordoverlap. Ingen model er involveret, saa tallene forbliver
+    deterministiske."""
+    scored = [(sum(1 for t in terms if t in str(h).lower()), str(h)) for h in headings]
+    scored = [x for x in scored if x[0] > 0]
+    scored.sort(key=lambda x: -x[0])
+    return [h for _, h in scored[:antal]]
+
+
 def gather(question: str, section_hint: str = "") -> dict:
     """Kør værktøjskæden som en model ville, og mål to trin hver for sig.
 
@@ -79,6 +89,13 @@ def gather(question: str, section_hint: str = "") -> dict:
         whole = srv.wiki_get(h["slug"], max_chars=PAGE_CHARS)
         if isinstance(whole, dict) and whole.get("body"):
             page_chunks.append(f"### {h['slug']}\n{whole['body']}")
+            # En lang side klippes. wiki_get oplyser hvilke sektioner der faldt udenfor,
+            # og en model med det svar ville hente den mest lovende i stedet for at svare
+            # paa 12.000 af 63.000 tegn. Kaeden simulerer det samme valg.
+            for head in _bedste_udeladte(whole.get("omitted_sections") or [], terms):
+                got = srv.wiki_get(h["slug"], section=head, max_chars=3000)
+                if isinstance(got, dict) and got.get("body"):
+                    page_chunks.append(f"### {h['slug']}#{head}\n{got['body']}")
 
     return {"slugs": slugs,
             "sections": "\n\n".join(sec_chunks),
